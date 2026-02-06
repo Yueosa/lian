@@ -1,0 +1,47 @@
+[package]
+name = "lian-pacman"
+version = "0.1.0"
+edition = "2021"
+authors = ["Your Name <your.email@example.com>"]
+description = "An AI-powered Arch Linux package update manager with TUI"
+
+[dependencies]
+# TUI 相关
+ratatui = "0.29"
+crossterm = "0.28"
+
+# 异步运行时
+tokio = { version = "1.42", features = ["full"] }
+
+# HTTP 客户端
+reqwest = { version = "0.12", features = ["json"] }
+
+# JSON 序列化
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# 日期时间
+chrono = "0.4"
+
+# 错误处理
+anyhow = "1.0"
+thiserror = "1.0"
+
+# 日志
+log = "0.4"
+env_logger = "0.11"
+
+# 配置文件
+toml = "0.8"
+
+# 进程管理
+duct = "0.13"
+
+# 系统调用
+libc = "0.2"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
