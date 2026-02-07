@@ -486,10 +486,9 @@ fn render_detail_view(f: &mut Frame, app: &App) {
         .split(area);
 
     // Header - 使用详情的第一个字段作为包名（兼容所有语言环境）
-    let pkg_name = app
-        .query_detail
+    let pkg_name = app.query.detail
         .as_ref()
-        .and_then(|d| d.fields.first().map(|(_, v)| v.as_str()))
+        .and_then(|d| d.fields.first().map(|(_, v): &(String, String)| v.as_str()))
         .unwrap_or("未知");
     layout::render_header(f, &format!("📦 包信息 - {}", pkg_name), chunks[0]);
 
