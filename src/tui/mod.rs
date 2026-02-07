@@ -88,12 +88,25 @@ pub async fn run(api_key: String, config: Config) -> Result<()> {
                         app.should_quit = true;
                     }
                     KeyCode::Esc => {
-                        if app.mode != AppMode::Dashboard {
-                            if app.mode == AppMode::Update {
+                        match app.mode {
+                            AppMode::Dashboard => {}
+                            AppMode::Update => {
                                 crate::package_manager::cancel_update();
+                                app.mode = AppMode::Dashboard;
+                                app.reset_scroll();
                             }
-                            app.mode = AppMode::Dashboard;
-                            app.reset_scroll();
+                            AppMode::Query => {
+                                // Query 模式自己处理 Esc（详情→列表→Dashboard）
+                                query::handle_query_key(
+                                    crossterm::event::KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+                                    &mut app,
+                                    &tx,
+                                );
+                            }
+                            _ => {
+                                app.mode = AppMode::Dashboard;
+                                app.reset_scroll();
+                            }
                         }
                     }
                     // 模式切换快捷键 (Shift + 字母)
@@ -116,8 +129,10 @@ pub async fn run(api_key: String, config: Config) -> Result<()> {
                         app.reset_scroll();
                     }
                     KeyCode::Char('Q') => {
-                        app.mode = AppMode::Query;
-                        app.reset_scroll();
+                        if app.mode != AppMode::Query {
+                            app.mode = AppMode::Query;
+                            app.reset_query_state();
+                        }
                     }
                     KeyCode::Char('C') => {
                         app.mode = AppMode::Settings;
@@ -153,7 +168,7 @@ pub async fn run(api_key: String, config: Config) -> Result<()> {
                                 remove::handle_remove_key(key, &mut app);
                             }
                             AppMode::Query => {
-                                query::handle_query_key(key, &mut app);
+                                query::handle_query_key(key, &mut app, &tx);
                             }
                             AppMode::Settings => {
                                 settings::handle_settings_key(key, &mut app);
