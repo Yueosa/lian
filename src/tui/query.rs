@@ -517,7 +517,7 @@ fn render_detail_content(f: &mut Frame, app: &App, area: Rect) {
     if let Some(detail) = &app.query_detail {
         for (key, value) in &detail.fields {
             let key_width = UnicodeWidthStr::width(key.as_str());
-            let target_width = 18;
+            let target_width: usize = 18;
             let pad = target_width.saturating_sub(key_width);
             let padded_key = format!("{}{} ", key, " ".repeat(pad));
             all_lines.push(Line::from(vec![
