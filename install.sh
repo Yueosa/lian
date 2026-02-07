@@ -52,17 +52,18 @@ echo "✅ 已安装到: $INSTALL_PATH"
 echo ""
 
 # 检查 API Key
-if [ -z "$DEEPSEEK_API_KEY" ]; then
-    echo "⚠️  未检测到 DEEPSEEK_API_KEY 环境变量"
+if [ -z "$LIAN_PACMAN_AI_KEY" ]; then
+    echo "⚠️  未检测到 LIAN_PACMAN_AI_KEY 环境变量"
     echo ""
-    echo "请设置你的 DeepSeek API Key:"
-    echo "  export DEEPSEEK_API_KEY='your-api-key-here'"
+    echo "请设置你的 AI API Key:"
+    echo "  export LIAN_PACMAN_AI_KEY='your-api-key-here'"
     echo ""
     echo "建议添加到 ~/.zshrc 或 ~/.bashrc:"
-    echo "  echo 'export DEEPSEEK_API_KEY=\"your-api-key\"' >> ~/.zshrc"
+    echo "  echo 'export LIAN_PACMAN_AI_KEY=\"your-api-key\"' >> ~/.zshrc"
     echo ""
+    echo "也可以在配置文件中设置 api_key 字段 (优先级更高)"
 else
-    echo "✅ 检测到 DEEPSEEK_API_KEY"
+    echo "✅ 检测到 LIAN_PACMAN_AI_KEY"
 fi
 
 # 创建配置目录
@@ -76,6 +77,16 @@ fi
 if [ ! -f "$CONFIG_DIR/config.toml" ]; then
     cat > "$CONFIG_DIR/config.toml" << 'EOF'
 # Lian-Pacman 配置文件
+
+# AI API 地址 (可选，默认为 DeepSeek)
+# 兼容 OpenAI 格式的 API 均可使用
+# api_url = "https://api.deepseek.com/chat/completions"
+
+# AI API Key (可选，优先级高于环境变量 LIAN_PACMAN_AI_KEY)
+# api_key = "sk-your-key-here"
+
+# HTTP 代理 (可选，支持 http/https/socks5)
+# proxy = "http://127.0.0.1:7890"
 
 # 使用的 AI 模型
 # 可选值: "deepseek-chat" (快速) 或 "deepseek-reasoner" (深度思考,推荐)
@@ -105,12 +116,16 @@ echo "🎉 安装完成!"
 echo ""
 echo "使用方法:"
 echo "  1. 设置 API Key (如果还没设置):"
-echo "     export DEEPSEEK_API_KEY='your-api-key'"
+echo "     export LIAN_PACMAN_AI_KEY='your-api-key'"
+echo "     或在配置文件中设置 api_key 字段"
 echo ""
 echo "  2. 运行程序:"
 echo "     lian-pacman"
 echo ""
-echo "  3. 查看帮助:"
+echo "  3. 测试模式 (不执行真实更新):"
+echo "     lian-pacman --test"
+echo ""
+echo "  4. 查看帮助:"
 echo "     lian-pacman --help"
 echo ""
 echo "配置文件位置: $CONFIG_DIR/config.toml"

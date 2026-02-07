@@ -1,6 +1,20 @@
 # Lian-Pacman 配置文件示例
 # 复制到 ~/.config/lian-pacman/config.toml 使用
 
+# AI API 地址 (可选)
+# 默认为 DeepSeek API，兼容 OpenAI 格式的 API 均可使用
+# 例如: OpenAI、Ollama、vLLM、LM Studio 等
+# api_url = "https://api.deepseek.com/chat/completions"
+
+# AI API Key (可选)
+# 优先级高于环境变量 LIAN_PACMAN_AI_KEY
+# api_key = "sk-your-key-here"
+
+# HTTP 代理 (可选)
+# 支持 http, https, socks5 协议
+# proxy = "http://127.0.0.1:7890"
+# proxy = "socks5://127.0.0.1:1080"
+
 # AI 模型选择
 # - "deepseek-chat": DeepSeek V3.2 非思考模式,响应快速
 # - "deepseek-reasoner": DeepSeek V3.2 思考模式,深度分析 (推荐)
