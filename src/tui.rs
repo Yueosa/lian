@@ -53,7 +53,6 @@ struct App {
     scroll_offset: usize,
     should_quit: bool,
     saved_report_path: Option<String>,
-    test_mode: bool,
 }
 
 impl App {
@@ -73,7 +72,6 @@ impl App {
             scroll_offset: 0,
             should_quit: false,
             saved_report_path: None,
-            test_mode: false,
         }
     }
 
@@ -174,7 +172,7 @@ impl App {
     }
 }
 
-pub async fn run(api_key: String, config: Config, test_mode: bool) -> Result<()> {
+pub async fn run(api_key: String, config: Config) -> Result<()> {
     // 设置终端
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -184,7 +182,6 @@ pub async fn run(api_key: String, config: Config, test_mode: bool) -> Result<()>
 
     // 创建应用状态
     let mut app = App::new();
-    app.test_mode = test_mode;
 
     // 创建通道用于异步任务通信
     let (tx, mut rx) = mpsc::channel(32);
@@ -268,15 +265,9 @@ pub async fn run(api_key: String, config: Config, test_mode: bool) -> Result<()>
                             // 开始更新
                             let pm = app.package_manager.clone().unwrap();
                             let tx_clone = tx.clone();
-                            let is_test_mode = app.test_mode;
                             app.state = AppState::Updating;
                             app.update_lines.clear();
-                            
-                            if is_test_mode {
-                                app.update_lines.push("🧪 [测试模式] 模拟更新输出...".to_string());
-                            } else {
-                                app.update_lines.push("正在执行更新...".to_string());
-                            }
+                            app.update_lines.push("正在执行更新...".to_string());
 
                             // 使用 std thread 运行阻塞的更新操作
                             std::thread::spawn(move || {
@@ -292,11 +283,7 @@ pub async fn run(api_key: String, config: Config, test_mode: bool) -> Result<()>
                                     }
                                 });
 
-                                let result = if is_test_mode {
-                                    pm.mock_update(output_tx)
-                                } else {
-                                    pm.update_streaming(output_tx)
-                                };
+                                let result = pm.update_streaming(output_tx);
                                 
                                 match result {
                                     Ok(output) => {
