@@ -12,7 +12,7 @@ impl ReportSaver {
         Self { base_dir }
     }
 
-    pub fn save(&self, content: &str) -> Result<PathBuf> {
+    pub fn save(&self, content: &str, distro_name: &str) -> Result<PathBuf> {
         // 创建基础目录
         fs::create_dir_all(&self.base_dir)?;
 
@@ -34,7 +34,8 @@ impl ReportSaver {
         // 添加元数据头部（纯文本格式）
         let mut full_content = String::new();
         full_content.push_str(&format!(
-            "Arch Linux 更新报告\n生成时间: {}\n\n",
+            "{} 更新报告\n生成时间: {}\n\n",
+            distro_name,
             now.format("%Y-%m-%d %H:%M:%S")
         ));
         full_content.push_str(content);

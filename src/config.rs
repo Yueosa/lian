@@ -55,7 +55,6 @@ impl Config {
     }
 
     /// 检查指定操作是否启用 AI 分析
-    #[allow(dead_code)]
     pub fn ai_enabled_for(&self, operation: &str) -> bool {
         match operation {
             "update" => self.ai.update,

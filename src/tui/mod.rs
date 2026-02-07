@@ -76,10 +76,8 @@ pub async fn run(api_key: String, config: Config) -> Result<()> {
 
                 // 全局按键
                 match key.code {
-                    KeyCode::Char('q') => {
-                        if app.mode == AppMode::Update {
-                            crate::package_manager::cancel_update();
-                        }
+                    // q 仅在 Dashboard 退出
+                    KeyCode::Char('q') if app.mode == AppMode::Dashboard => {
                         app.should_quit = true;
                     }
                     KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -128,7 +126,24 @@ pub async fn run(api_key: String, config: Config) -> Result<()> {
                     _ => {
                         match app.mode {
                             AppMode::Update => {
-                                update::handle_update_key(key, &mut app, &tx, term_size.height);
+                                // Enter 在 PreUpdate 状态需要先进行 sudo 鉴权
+                                if key.code == KeyCode::Enter && app.state == AppState::PreUpdate {
+                                    match validate_sudo_tui(&mut terminal) {
+                                        Ok(true) => {
+                                            update::spawn_update_task(&mut app, &tx);
+                                        }
+                                        Ok(false) => {
+                                            app.error_message = Some("sudo 验证失败，请确保你有 sudo 权限".to_string());
+                                            app.state = AppState::Error;
+                                        }
+                                        Err(e) => {
+                                            app.error_message = Some(format!("sudo 验证出错: {}", e));
+                                            app.state = AppState::Error;
+                                        }
+                                    }
+                                } else {
+                                    update::handle_update_key(key, &mut app, term_size.height);
+                                }
                             }
                             AppMode::Install => {
                                 install::handle_install_key(key, &mut app);
@@ -220,6 +235,52 @@ pub async fn run(api_key: String, config: Config) -> Result<()> {
     terminal.show_cursor()?;
 
     Ok(())
+}
+
+/// 临时退出 TUI 执行 sudo 鉴权，成功后恢复 TUI
+fn validate_sudo_tui(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+) -> Result<bool> {
+    // 退出 TUI
+    disable_raw_mode()?;
+    execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        DisableMouseCapture
+    )?;
+    terminal.show_cursor()?;
+
+    // 提示并执行 sudo -v
+    println!("🔐 需要 sudo 权限来执行此操作");
+    println!();
+
+    let status = std::process::Command::new("sudo")
+        .arg("-v")
+        .status()?;
+
+    let success = status.success();
+
+    if success {
+        println!();
+        println!("✅ sudo 验证成功！");
+    } else {
+        println!();
+        println!("❌ sudo 验证失败");
+    }
+
+    std::thread::sleep(std::time::Duration::from_millis(500));
+
+    // 恢复 TUI
+    enable_raw_mode()?;
+    execute!(
+        terminal.backend_mut(),
+        EnterAlternateScreen,
+        EnableMouseCapture
+    )?;
+    terminal.hide_cursor()?;
+    terminal.clear()?;
+
+    Ok(success)
 }
 
 fn ui(f: &mut Frame, app: &App) {

@@ -66,9 +66,9 @@ pub fn render_dashboard(f: &mut Frame, app: &App) {
 
     if let Some(count) = app.installed_count {
         let count_str = format!("{count} 个");
-        lines.push(info_line_owned("已安装包  ", &count_str));
+        lines.push(info_line("已安装包  ", &count_str));
     } else {
-        lines.push(info_line_owned("已安装包  ", "统计中..."));
+        lines.push(info_line("已安装包  ", "统计中..."));
     }
 
     lines.push(Line::from(""));
@@ -120,19 +120,8 @@ pub fn render_dashboard(f: &mut Frame, app: &App) {
     f.render_widget(paragraph, vertical[1]);
 }
 
-/// 系统信息行: "  标签: 值" (owned, for formatted strings)
-fn info_line_owned(label: &str, value: &str) -> Line<'static> {
-    Line::from(vec![
-        Span::styled(
-            format!("{label}: "),
-            Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(value.to_string(), Style::default().fg(Color::White)),
-    ])
-}
-
 /// 系统信息行: "  标签: 值"
-fn info_line<'a>(label: &'a str, value: &'a str) -> Line<'a> {
+fn info_line(label: &str, value: &str) -> Line<'static> {
     Line::from(vec![
         Span::styled(
             format!("{label}: "),

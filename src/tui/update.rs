@@ -16,7 +16,6 @@ use tokio::sync::mpsc;
 pub fn handle_update_key(
     key: KeyEvent,
     app: &mut App,
-    tx: &mpsc::Sender<AppEvent>,
     term_height: u16,
 ) -> bool {
     match key.code {
@@ -50,18 +49,12 @@ pub fn handle_update_key(
             app.scroll_page_down(10, content.len(), visible);
             true
         }
-        KeyCode::Enter => {
-            if app.state == AppState::PreUpdate {
-                spawn_update_task(app, tx);
-            }
-            true
-        }
         _ => false,
     }
 }
 
 /// 启动更新异步任务
-fn spawn_update_task(app: &mut App, tx: &mpsc::Sender<AppEvent>) {
+pub fn spawn_update_task(app: &mut App, tx: &mpsc::Sender<AppEvent>) {
     let pm = match app.package_manager.clone() {
         Some(pm) => pm,
         None => return,
@@ -110,7 +103,7 @@ pub fn handle_update_complete(
     config: &Config,
 ) {
     if let Some(output) = &app.update_output {
-        if output.success {
+        if output.success && config.ai_enabled_for("update") {
             app.state = AppState::Analyzing;
 
             let pm_name = app.package_manager.as_ref().unwrap().name().to_string();
@@ -148,6 +141,9 @@ pub fn handle_update_complete(
                     }
                 }
             });
+        } else if output.success {
+            // AI 分析已关闭
+            app.add_update_line("AI 分析已关闭，可在设置中开启".to_string());
         }
     }
 }
@@ -165,10 +161,13 @@ pub fn handle_analysis_complete(
     app.reset_scroll();
 
     let report_dir = config.report_dir.clone();
+    let distro_name = app.system_info.as_ref()
+        .map(|info| info.distro.clone())
+        .unwrap_or_else(|| "Linux".to_string());
     let tx_clone = tx.clone();
     tokio::spawn(async move {
         let saver = ReportSaver::new(report_dir);
-        match saver.save(&analysis) {
+        match saver.save(&analysis, &distro_name) {
             Ok(path) => {
                 let _ = tx_clone
                     .send(AppEvent::ReportSaved(path.display().to_string()))
@@ -242,7 +241,7 @@ fn render_update_footer(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                 &owned_text
             }
         }
-        AppState::UpdateComplete => "更新完成,等待 AI 分析...",
+        AppState::UpdateComplete => "更新完成 | ↑↓ 滚动 | Esc 返回主页",
         AppState::Analyzing => "AI 正在分析更新内容...",
         AppState::AnalysisComplete => {
             if let Some(path) = &app.saved_report_path {
