@@ -310,3 +310,196 @@ impl UpdateOutput {
         format!("{}\n{}", self.stdout, self.stderr)
     }
 }
+
+// ===== 查询相关结构体和方法 =====
+
+/// 搜索结果条目
+#[derive(Debug, Clone)]
+pub struct PackageInfo {
+    pub repo: String,
+    pub name: String,
+    pub version: String,
+    pub description: String,
+    pub installed: bool,
+}
+
+/// 包详情
+#[derive(Debug, Clone)]
+pub struct PackageDetail {
+    pub fields: Vec<(String, String)>,
+    pub raw_output: String,
+}
+
+impl PackageManager {
+    /// 搜索本地已安装包 (pacman -Qs)
+    pub fn search_local(&self, keyword: &str) -> Vec<PackageInfo> {
+        if keyword.trim().is_empty() {
+            return Vec::new();
+        }
+        let output = Command::new("pacman")
+            .args(["-Qs", keyword])
+            .output();
+        match output {
+            Ok(o) if o.status.success() => {
+                parse_search_output(&String::from_utf8_lossy(&o.stdout), true)
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// 搜索远程仓库包 (paru/yay/pacman -Ss)
+    pub fn search_remote(&self, keyword: &str) -> Vec<PackageInfo> {
+        if keyword.trim().is_empty() {
+            return Vec::new();
+        }
+        let output = Command::new(&self.command)
+            .args(["-Ss", keyword])
+            .output();
+        match output {
+            Ok(o) if o.status.success() => {
+                parse_search_output(&String::from_utf8_lossy(&o.stdout), false)
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// 获取本地包详情 (pacman -Qi)
+    pub fn package_info_local(&self, name: &str) -> Result<PackageDetail> {
+        let output = Command::new("pacman")
+            .args(["-Qi", name])
+            .output()?;
+        if !output.status.success() {
+            anyhow::bail!("pacman -Qi {} 执行失败", name);
+        }
+        let raw = String::from_utf8_lossy(&output.stdout).to_string();
+        Ok(parse_package_detail(&raw))
+    }
+
+    /// 获取远程包详情 (pacman -Si)
+    pub fn package_info_remote(&self, name: &str) -> Result<PackageDetail> {
+        let output = Command::new("pacman")
+            .args(["-Si", name])
+            .output()?;
+        if !output.status.success() {
+            anyhow::bail!("pacman -Si {} 执行失败", name);
+        }
+        let raw = String::from_utf8_lossy(&output.stdout).to_string();
+        Ok(parse_package_detail(&raw))
+    }
+
+    /// 获取已安装包的文件列表 (pacman -Ql)
+    pub fn package_files(&self, name: &str) -> Vec<String> {
+        let output = Command::new("pacman")
+            .args(["-Ql", name])
+            .output();
+        match output {
+            Ok(o) if o.status.success() => {
+                String::from_utf8_lossy(&o.stdout)
+                    .lines()
+                    .map(|line| {
+                        // 格式: "pkgname /path/to/file"
+                        if let Some(pos) = line.find(' ') {
+                            line[pos + 1..].to_string()
+                        } else {
+                            line.to_string()
+                        }
+                    })
+                    .collect()
+            }
+            _ => Vec::new(),
+        }
+    }
+}
+
+/// 解析 pacman -Qs / -Ss 的搜索输出
+/// 格式:
+///   repo/name version [installed]
+///       description
+fn parse_search_output(output: &str, is_local: bool) -> Vec<PackageInfo> {
+    let mut results = Vec::new();
+    let lines: Vec<&str> = output.lines().collect();
+    let mut i = 0;
+
+    while i < lines.len() {
+        let line = lines[i];
+        // 包头行: 不以空格开头
+        if !line.starts_with(' ') && !line.starts_with('\t') {
+            let cleaned = clean_terminal_output(line);
+            let trimmed = cleaned.trim();
+
+            // 解析 "repo/name version [installed]" 或 "local/name version"
+            if let Some(slash_pos) = trimmed.find('/') {
+                let repo = &trimmed[..slash_pos];
+                let rest = &trimmed[slash_pos + 1..];
+                let parts: Vec<&str> = rest.split_whitespace().collect();
+
+                if let Some(&name) = parts.first() {
+                    let version = parts.get(1).unwrap_or(&"").to_string();
+                    let installed = is_local
+                        || rest.contains("[installed")
+                        || rest.contains("[已安装");
+
+                    // 下一行是描述
+                    let description = if i + 1 < lines.len() {
+                        let desc_line = lines[i + 1];
+                        if desc_line.starts_with(' ') || desc_line.starts_with('\t') {
+                            i += 1;
+                            clean_terminal_output(desc_line.trim())
+                        } else {
+                            String::new()
+                        }
+                    } else {
+                        String::new()
+                    };
+
+                    results.push(PackageInfo {
+                        repo: repo.to_string(),
+                        name: name.to_string(),
+                        version,
+                        description,
+                        installed,
+                    });
+                }
+            }
+        }
+        i += 1;
+    }
+
+    results
+}
+
+/// 解析 pacman -Qi / -Si 的详情输出
+/// 格式:
+///   Key            : Value
+///   Key            : Value that
+///                    spans multiple lines
+fn parse_package_detail(output: &str) -> PackageDetail {
+    let mut fields: Vec<(String, String)> = Vec::new();
+
+    for line in output.lines() {
+        if let Some(colon_pos) = line.find(':') {
+            let key_part = &line[..colon_pos];
+            let value_part = line[colon_pos + 1..].trim();
+
+            // 如果 key 部分不以空格开头，且包含非空字符，则是新字段
+            if !key_part.starts_with(' ') || key_part.trim().is_empty() {
+                let key = key_part.trim();
+                if !key.is_empty() {
+                    fields.push((key.to_string(), value_part.to_string()));
+                    continue;
+                }
+            }
+        }
+        // 续行（以空格开头，无冒号分隔的 key）
+        if (line.starts_with(' ') || line.starts_with('\t')) && !fields.is_empty() {
+            let last = fields.last_mut().unwrap();
+            last.1.push(' ');
+            last.1.push_str(line.trim());
+        }
+    }
+
+    PackageDetail {
+        fields,
+        raw_output: output.to_string(),
+    }
+}
