@@ -8,7 +8,7 @@ use ratatui::{
     layout::{Alignment, Margin},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap},
+    widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
     Frame,
 };
 use tokio::sync::mpsc;
@@ -554,7 +554,7 @@ fn render_package_list(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         })
         .collect();
 
-    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
+    let paragraph = Paragraph::new(lines);
     f.render_widget(paragraph, area);
 
     // 滚动条
@@ -562,7 +562,7 @@ fn render_package_list(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .begin_symbol(Some("↑"))
             .end_symbol(Some("↓"));
-        let mut state = ScrollbarState::new(total).position(scroll);
+        let mut state = ScrollbarState::new(total).position(app.remove.selected);
         f.render_stateful_widget(
             scrollbar,
             area.inner(Margin { horizontal: 0, vertical: 0 }),

@@ -8,7 +8,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Margin, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap},
+    widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
     Frame,
 };
 use tokio::sync::mpsc;
@@ -452,8 +452,7 @@ fn render_result_panel(
         }
     }
 
-    let paragraph = Paragraph::new(lines)
-        .wrap(Wrap { trim: false });
+    let paragraph = Paragraph::new(lines);
     f.render_widget(paragraph, padded);
 
     // 滚动条
@@ -461,7 +460,7 @@ fn render_result_panel(
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .begin_symbol(Some("↑"))
             .end_symbol(Some("↓"));
-        let mut scrollbar_state = ScrollbarState::new(results.len()).position(scroll);
+        let mut scrollbar_state = ScrollbarState::new(results.len()).position(selected);
         f.render_stateful_widget(
             scrollbar,
             area.inner(ratatui::layout::Margin {
@@ -589,8 +588,7 @@ fn render_detail_content(f: &mut Frame, app: &App, area: Rect) {
         .take(visible_height)
         .collect();
 
-    let paragraph = Paragraph::new(visible)
-        .wrap(Wrap { trim: false });
+    let paragraph = Paragraph::new(visible);
     f.render_widget(paragraph, padded);
 
     // 滚动条
@@ -598,7 +596,8 @@ fn render_detail_content(f: &mut Frame, app: &App, area: Rect) {
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .begin_symbol(Some("↑"))
             .end_symbol(Some("↓"));
-        let mut scrollbar_state = ScrollbarState::new(total_lines).position(actual_scroll);
+        let scrollbar_pos = (actual_scroll + visible_height).min(total_lines).saturating_sub(1);
+        let mut scrollbar_state = ScrollbarState::new(total_lines).position(scrollbar_pos);
         f.render_stateful_widget(
             scrollbar,
             area.inner(Margin {
