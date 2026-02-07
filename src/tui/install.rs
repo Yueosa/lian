@@ -514,6 +514,9 @@ fn render_result_list(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     // MTF flag colors
     let pink = Color::Rgb(245, 169, 184);
     let blue = Color::Rgb(91, 206, 250);
+    let sel_bg = Color::Rgb(45, 35, 55);
+    let bright_white = Color::Rgb(255, 255, 255);
+    let dim = Color::Rgb(130, 130, 140);
 
     let lines: Vec<Line> = app.install_results
         .iter()
@@ -529,35 +532,45 @@ fn render_result_list(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             let installed_tag = if pkg.installed { " [已安装]" } else { "" };
 
             if is_selected {
-                // 选中行：全粉色加粗
-                let text = format!(
-                    "{}{}{}/{} {}{} - {}",
-                    cursor, marker, pkg.repo, pkg.name, pkg.version, installed_tag, pkg.description
-                );
-                Line::from(Span::styled(text, Style::default().fg(pink).add_modifier(Modifier::BOLD)))
+                // 选中行：深色背景 + 多色加粗
+                let bg = Style::default().bg(sel_bg);
+                Line::from(vec![
+                    Span::styled(format!("{}{}", cursor, marker), bg.fg(bright_white).add_modifier(Modifier::BOLD)),
+                    Span::styled(format!("{}/", pkg.repo), bg.fg(pink).add_modifier(Modifier::BOLD)),
+                    Span::styled(pkg.name.clone(), bg.fg(bright_white).add_modifier(Modifier::BOLD)),
+                    Span::styled(format!(" {}", pkg.version), bg.fg(blue)),
+                    Span::styled(installed_tag.to_string(), bg.fg(dim)),
+                    Span::styled(format!(" - {}", pkg.description), bg.fg(Color::Rgb(180, 180, 190))),
+                ])
             } else if is_marked {
-                // 标记行：粉色
-                let text = format!(
-                    "{}{}{}/{} {}{} - {}",
-                    cursor, marker, pkg.repo, pkg.name, pkg.version, installed_tag, pkg.description
-                );
-                Line::from(Span::styled(text, Style::default().fg(pink)))
+                // 标记行：粉色标识
+                Line::from(vec![
+                    Span::styled(format!("{}{}", cursor, marker), Style::default().fg(pink)),
+                    Span::styled(format!("{}/", pkg.repo), Style::default().fg(pink)),
+                    Span::styled(pkg.name.clone(), Style::default().fg(pink)),
+                    Span::styled(format!(" {}", pkg.version), Style::default().fg(Color::White)),
+                    Span::styled(installed_tag.to_string(), Style::default().fg(dim)),
+                    Span::styled(format!(" - {}", pkg.description), Style::default().fg(dim)),
+                ])
             } else if pkg.installed {
                 // 已安装：暗灰
-                let text = format!(
-                    "{}{}{}/{} {}{} - {}",
-                    cursor, marker, pkg.repo, pkg.name, pkg.version, installed_tag, pkg.description
-                );
-                Line::from(Span::styled(text, Style::default().fg(Color::DarkGray)))
-            } else {
-                // 正常行：分色显示 — 名称蓝色，版本白色，描述灰色
                 Line::from(vec![
-                    Span::styled(format!("{}{}", cursor, marker), Style::default().fg(Color::White)),
+                    Span::styled(format!("{}{}", cursor, marker), Style::default().fg(Color::DarkGray)),
                     Span::styled(format!("{}/", pkg.repo), Style::default().fg(Color::DarkGray)),
-                    Span::styled(pkg.name.clone(), Style::default().fg(blue)),
-                    Span::styled(format!(" {}", pkg.version), Style::default().fg(Color::White)),
+                    Span::styled(pkg.name.clone(), Style::default().fg(Color::DarkGray)),
+                    Span::styled(format!(" {}", pkg.version), Style::default().fg(Color::DarkGray)),
                     Span::styled(installed_tag.to_string(), Style::default().fg(Color::DarkGray)),
                     Span::styled(format!(" - {}", pkg.description), Style::default().fg(Color::DarkGray)),
+                ])
+            } else {
+                // 正常行：repo 粉色，名称蓝色，版本白色，描述灰色
+                Line::from(vec![
+                    Span::styled(format!("{}{}", cursor, marker), Style::default().fg(Color::White)),
+                    Span::styled(format!("{}/", pkg.repo), Style::default().fg(pink)),
+                    Span::styled(pkg.name.clone(), Style::default().fg(blue)),
+                    Span::styled(format!(" {}", pkg.version), Style::default().fg(Color::White)),
+                    Span::styled(installed_tag.to_string(), Style::default().fg(dim)),
+                    Span::styled(format!(" - {}", pkg.description), Style::default().fg(dim)),
                 ])
             }
         })

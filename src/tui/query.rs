@@ -443,6 +443,9 @@ fn render_result_panel(
     // MTF flag colors
     let pink = Color::Rgb(245, 169, 184);
     let blue = Color::Rgb(91, 206, 250);
+    let sel_bg = Color::Rgb(45, 35, 55);
+    let bright_white = Color::Rgb(255, 255, 255);
+    let dim = Color::Rgb(130, 130, 140);
 
     let mut lines: Vec<Line> = Vec::new();
     for (i, pkg) in results.iter().enumerate().skip(scroll).take(visible_items) {
@@ -452,21 +455,21 @@ fn render_result_panel(
 
         // 第一行：包名 + 版本
         if is_selected {
-            let name_line = format!(
-                "{}{}/{} {}{}",
-                marker, pkg.repo, pkg.name, pkg.version, installed_mark
-            );
-            lines.push(Line::from(Span::styled(
-                name_line,
-                Style::default().fg(pink).add_modifier(Modifier::BOLD),
-            )));
+            let bg = Style::default().bg(sel_bg);
+            lines.push(Line::from(vec![
+                Span::styled(marker.to_string(), bg.fg(bright_white).add_modifier(Modifier::BOLD)),
+                Span::styled(format!("{}/", pkg.repo), bg.fg(pink).add_modifier(Modifier::BOLD)),
+                Span::styled(pkg.name.clone(), bg.fg(bright_white).add_modifier(Modifier::BOLD)),
+                Span::styled(format!(" {}", pkg.version), bg.fg(blue)),
+                Span::styled(installed_mark.to_string(), bg.fg(dim)),
+            ]));
         } else {
             lines.push(Line::from(vec![
                 Span::styled(marker.to_string(), Style::default().fg(Color::White)),
-                Span::styled(format!("{}/", pkg.repo), Style::default().fg(Color::DarkGray)),
+                Span::styled(format!("{}/", pkg.repo), Style::default().fg(pink)),
                 Span::styled(pkg.name.clone(), Style::default().fg(blue)),
                 Span::styled(format!(" {}", pkg.version), Style::default().fg(Color::White)),
-                Span::styled(installed_mark.to_string(), Style::default().fg(Color::DarkGray)),
+                Span::styled(installed_mark.to_string(), Style::default().fg(dim)),
             ]));
         }
 
@@ -476,12 +479,17 @@ fn render_result_panel(
         } else {
             pkg.description.clone()
         };
-        let desc_style = if is_selected {
-            Style::default().fg(pink)
+        if is_selected {
+            lines.push(Line::from(Span::styled(
+                format!("    {}", desc),
+                Style::default().bg(sel_bg).fg(Color::Rgb(180, 180, 190)),
+            )));
         } else {
-            Style::default().fg(Color::DarkGray)
-        };
-        lines.push(Line::from(Span::styled(format!("    {}", desc), desc_style)));
+            lines.push(Line::from(Span::styled(
+                format!("    {}", desc),
+                Style::default().fg(Color::DarkGray),
+            )));
+        }
     }
 
     let paragraph = Paragraph::new(lines)

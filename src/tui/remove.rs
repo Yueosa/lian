@@ -542,27 +542,34 @@ fn render_package_list(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             // MTF flag colors
             let pink = Color::Rgb(245, 169, 184);
             let blue = Color::Rgb(91, 206, 250);
+            let sel_bg = Color::Rgb(45, 35, 55);
+            let bright_white = Color::Rgb(255, 255, 255);
+            let dim = Color::Rgb(130, 130, 140);
 
             if is_selected {
-                let text = format!(
-                    "{}{}{} {}{}{}",
-                    cursor, marker, pkg.name, pkg.version,
-                    " ".repeat(padding), pkg.size
-                );
-                Line::from(Span::styled(text, Style::default().fg(pink).add_modifier(Modifier::BOLD)))
+                // 选中行：深色背景 + 多色加粗
+                let bg = Style::default().bg(sel_bg);
+                Line::from(vec![
+                    Span::styled(format!("{}{}", cursor, marker), bg.fg(bright_white).add_modifier(Modifier::BOLD)),
+                    Span::styled(pkg.name.clone(), bg.fg(bright_white).add_modifier(Modifier::BOLD)),
+                    Span::styled(format!(" {}", pkg.version), bg.fg(blue)),
+                    Span::styled(format!("{}{}", " ".repeat(padding), pkg.size), bg.fg(Color::Rgb(180, 180, 190))),
+                ])
             } else if is_marked {
-                let text = format!(
-                    "{}{}{} {}{}{}",
-                    cursor, marker, pkg.name, pkg.version,
-                    " ".repeat(padding), pkg.size
-                );
-                Line::from(Span::styled(text, Style::default().fg(pink)))
+                // 标记行：粉色标识
+                Line::from(vec![
+                    Span::styled(format!("{}{}", cursor, marker), Style::default().fg(pink)),
+                    Span::styled(pkg.name.clone(), Style::default().fg(pink)),
+                    Span::styled(format!(" {}", pkg.version), Style::default().fg(Color::White)),
+                    Span::styled(format!("{}{}", " ".repeat(padding), pkg.size), Style::default().fg(dim)),
+                ])
             } else {
+                // 正常行：名称蓝色，版本白色，大小灰色
                 Line::from(vec![
                     Span::styled(format!("{}{}", cursor, marker), Style::default().fg(Color::White)),
                     Span::styled(pkg.name.clone(), Style::default().fg(blue)),
                     Span::styled(format!(" {}", pkg.version), Style::default().fg(Color::White)),
-                    Span::styled(format!("{}{}", " ".repeat(padding), pkg.size), Style::default().fg(Color::DarkGray)),
+                    Span::styled(format!("{}{}", " ".repeat(padding), pkg.size), Style::default().fg(dim)),
                 ])
             }
         })
