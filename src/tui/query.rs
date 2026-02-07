@@ -122,15 +122,15 @@ fn handle_list_key(
                 return;
             }
             str_insert_char(&mut app.query.input, &mut app.query.cursor, c);
-            trigger_search(app, tx);
+            schedule_search(app);
         }
         KeyCode::Backspace => {
             str_delete_back(&mut app.query.input, &mut app.query.cursor);
-            trigger_search(app, tx);
+            schedule_search(app);
         }
         KeyCode::Delete => {
             str_delete_forward(&mut app.query.input, &mut app.query.cursor);
-            trigger_search(app, tx);
+            schedule_search(app);
         }
         KeyCode::Left => {
             if app.query.cursor > 0 {
@@ -153,8 +153,8 @@ fn handle_list_key(
     }
 }
 
-/// 触发异步搜索
-fn trigger_search(app: &mut App, tx: &mpsc::Sender<AppEvent>) {
+/// 计划异步搜索（防抖）
+fn schedule_search(app: &mut App) {
     let keyword = app.query.input.clone();
     if keyword.trim().is_empty() {
         app.query.local_results.clear();
@@ -162,15 +162,29 @@ fn trigger_search(app: &mut App, tx: &mpsc::Sender<AppEvent>) {
         app.query.local_selected = 0;
         app.query.remote_selected = 0;
         app.query.searching = false;
+        app.query.search_scheduled = None;
+        app.query.search_seq = app.query.search_seq.wrapping_add(1);
         return;
     }
 
+    app.query.search_seq = app.query.search_seq.wrapping_add(1);
     app.query.searching = true;
+    app.query.search_scheduled = Some(std::time::Instant::now());
+}
+
+/// 执行待处理的搜索（由主循环防抖后调用）
+pub fn execute_pending_search(app: &mut App, tx: &mpsc::Sender<AppEvent>) {
+    let keyword = app.query.input.clone();
+    if keyword.trim().is_empty() {
+        return;
+    }
 
     let pm = match app.package_manager.clone() {
         Some(pm) => pm,
         None => return,
     };
+
+    let seq = app.query.search_seq;
 
     // 本地搜索
     let tx_local = tx.clone();
@@ -180,7 +194,7 @@ fn trigger_search(app: &mut App, tx: &mpsc::Sender<AppEvent>) {
         let results = tokio::task::spawn_blocking(move || pm_local.search_local(&kw_local))
             .await
             .unwrap_or_default();
-        let _ = tx_local.send(AppEvent::QueryLocalResults(results)).await;
+        let _ = tx_local.send(AppEvent::QueryLocalResults { results, seq }).await;
     });
 
     // 远程搜索
@@ -190,7 +204,7 @@ fn trigger_search(app: &mut App, tx: &mpsc::Sender<AppEvent>) {
         let results = tokio::task::spawn_blocking(move || pm.search_remote(&kw_remote))
             .await
             .unwrap_or_default();
-        let _ = tx_remote.send(AppEvent::QueryRemoteResults(results)).await;
+        let _ = tx_remote.send(AppEvent::QueryRemoteResults { results, seq }).await;
     });
 }
 

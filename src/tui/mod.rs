@@ -123,6 +123,23 @@ pub async fn run(api_key: String, config: Config) -> Result<()> {
             }
         }
 
+        // 防抖: 延迟执行搜索，避免每次按键都触发
+        {
+            const DEBOUNCE_MS: u128 = 250;
+            if let Some(scheduled) = app.query.search_scheduled {
+                if scheduled.elapsed().as_millis() >= DEBOUNCE_MS {
+                    app.query.search_scheduled = None;
+                    query::execute_pending_search(&mut app, &tx);
+                }
+            }
+            if let Some(scheduled) = app.install.search_scheduled {
+                if scheduled.elapsed().as_millis() >= DEBOUNCE_MS {
+                    app.install.search_scheduled = None;
+                    install::execute_pending_search(&mut app, &tx);
+                }
+            }
+        }
+
         terminal.draw(|f| ui(f, &app))?;
 
         // 处理事件
@@ -394,15 +411,23 @@ pub async fn run(api_key: String, config: Config) -> Result<()> {
                         _ => { app.update.phase = UpdatePhase::Error; }
                     }
                 }
-                AppEvent::QueryLocalResults(results) => {
-                    app.query.local_results = results;
-                    app.query.local_selected = 0;
-                    app.query.searching = false;
+                AppEvent::QueryLocalResults { results, seq } => {
+                    if seq == app.query.search_seq {
+                        app.query.local_results = results;
+                        app.query.local_selected = 0;
+                        if app.query.search_scheduled.is_none() {
+                            app.query.searching = false;
+                        }
+                    }
                 }
-                AppEvent::QueryRemoteResults(results) => {
-                    app.query.remote_results = results;
-                    app.query.remote_selected = 0;
-                    app.query.searching = false;
+                AppEvent::QueryRemoteResults { results, seq } => {
+                    if seq == app.query.search_seq {
+                        app.query.remote_results = results;
+                        app.query.remote_selected = 0;
+                        if app.query.search_scheduled.is_none() {
+                            app.query.searching = false;
+                        }
+                    }
                 }
                 AppEvent::QueryDetailLoaded { detail, files, dirs } => {
                     app.query.detail = Some(detail);
@@ -428,11 +453,15 @@ pub async fn run(api_key: String, config: Config) -> Result<()> {
                     app.update.reset_scroll();
                 }
                 // ===== Install 事件 =====
-                AppEvent::InstallSearchResults(results) => {
-                    app.install.results = results;
-                    app.install.selected = 0;
-                    app.install.marked.clear();
-                    app.install.searching = false;
+                AppEvent::InstallSearchResults { results, seq } => {
+                    if seq == app.install.search_seq {
+                        app.install.results = results;
+                        app.install.selected = 0;
+                        app.install.marked.clear();
+                        if app.install.search_scheduled.is_none() {
+                            app.install.searching = false;
+                        }
+                    }
                 }
                 AppEvent::InstallPreviewReady(preview) => {
                     app.install.preview = preview;

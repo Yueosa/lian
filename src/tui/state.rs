@@ -2,6 +2,7 @@ use crate::config::Config;
 use crate::package_manager::{InstalledPackage, PackageDetail, PackageInfo, PackageManager, UpdateOutput};
 use crate::sysinfo::SystemInfo;
 use std::collections::HashSet;
+use std::time::Instant;
 
 // ========== 枚举 ==========
 
@@ -108,8 +109,8 @@ pub enum AppEvent {
     ReportSaved(String),
     Error(String),
     InstalledCount(usize),
-    QueryLocalResults(Vec<PackageInfo>),
-    QueryRemoteResults(Vec<PackageInfo>),
+    QueryLocalResults { results: Vec<PackageInfo>, seq: u64 },
+    QueryRemoteResults { results: Vec<PackageInfo>, seq: u64 },
     QueryDetailLoaded {
         detail: PackageDetail,
         files: Vec<String>,
@@ -117,7 +118,7 @@ pub enum AppEvent {
     },
     UpdatePreviewReady(Vec<String>),
     // Install
-    InstallSearchResults(Vec<PackageInfo>),
+    InstallSearchResults { results: Vec<PackageInfo>, seq: u64 },
     InstallPreviewReady(Vec<String>),
     InstallLine(String),
     InstallComplete { output: UpdateOutput },
@@ -161,6 +162,8 @@ pub struct QueryModeState {
     pub file_mode: FileListMode,
     pub detail_scroll: usize,
     pub searching: bool,
+    pub search_seq: u64,
+    pub search_scheduled: Option<Instant>,
 }
 
 pub struct InstallModeState {
@@ -177,6 +180,8 @@ pub struct InstallModeState {
     pub analysis: Option<String>,
     pub scroll: usize,
     pub searching: bool,
+    pub search_seq: u64,
+    pub search_scheduled: Option<Instant>,
     pub view_mode: ViewMode,
     pub report_path: Option<String>,
 }
@@ -345,6 +350,8 @@ impl QueryModeState {
             file_mode: FileListMode::Files,
             detail_scroll: 0,
             searching: false,
+            search_seq: 0,
+            search_scheduled: None,
         }
     }
 }
@@ -365,6 +372,8 @@ impl InstallModeState {
             analysis: None,
             scroll: 0,
             searching: false,
+            search_seq: 0,
+            search_scheduled: None,
             view_mode: ViewMode::UpdateLog,
             report_path: None,
         }

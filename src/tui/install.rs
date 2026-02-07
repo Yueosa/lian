@@ -110,12 +110,12 @@ fn handle_searching_key(
         }
         KeyCode::Backspace => {
             str_delete_back(&mut app.install.input, &mut app.install.cursor);
-            trigger_search(app, tx);
+            schedule_search(app);
             true
         }
         KeyCode::Delete => {
             str_delete_forward(&mut app.install.input, &mut app.install.cursor);
-            trigger_search(app, tx);
+            schedule_search(app);
             true
         }
         KeyCode::Left => {
@@ -144,7 +144,7 @@ fn handle_searching_key(
                 return false;
             }
             str_insert_char(&mut app.install.input, &mut app.install.cursor, c);
-            trigger_search(app, tx);
+            schedule_search(app);
             true
         }
         _ => false,
@@ -235,25 +235,39 @@ fn handle_complete_key(key: KeyEvent, app: &mut App, term_height: u16) -> bool {
     }
 }
 
-/// 触发异步搜索
-fn trigger_search(app: &mut App, tx: &mpsc::Sender<AppEvent>) {
+/// 计划异步搜索（防抖）
+fn schedule_search(app: &mut App) {
     let keyword = app.install.input.clone();
     if keyword.trim().is_empty() {
         app.install.results.clear();
         app.install.selected = 0;
         app.install.marked.clear();
         app.install.searching = false;
+        app.install.search_scheduled = None;
+        app.install.search_seq = app.install.search_seq.wrapping_add(1);
+        return;
+    }
+
+    app.install.search_seq = app.install.search_seq.wrapping_add(1);
+    app.install.searching = true;
+    app.install.search_scheduled = Some(std::time::Instant::now());
+}
+
+/// 执行待处理的搜索（由主循环防抖后调用）
+pub fn execute_pending_search(app: &mut App, tx: &mpsc::Sender<AppEvent>) {
+    let keyword = app.install.input.clone();
+    if keyword.trim().is_empty() {
         return;
     }
 
     if let Some(pm) = app.package_manager.clone() {
-        app.install.searching = true;
+        let seq = app.install.search_seq;
         let tx_clone = tx.clone();
         tokio::spawn(async move {
             let results = tokio::task::spawn_blocking(move || pm.search_remote(&keyword))
                 .await
                 .unwrap_or_default();
-            let _ = tx_clone.send(AppEvent::InstallSearchResults(results)).await;
+            let _ = tx_clone.send(AppEvent::InstallSearchResults { results, seq }).await;
         });
     }
 }
