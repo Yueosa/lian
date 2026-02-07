@@ -494,29 +494,94 @@ impl PackageManager {
 
     /// 预览卸载操作（显示将被移除的包）
     pub fn preview_remove(&self, packages: &[String]) -> Vec<String> {
+        let mut lines = Vec::new();
+
+        // 用 pacman -Qi 获取每个包的详细信息
+        for pkg in packages {
+            let output = Command::new("pacman")
+                .args(["-Qi", pkg])
+                .output();
+
+            if let Ok(o) = output {
+                if o.status.success() {
+                    let info = String::from_utf8_lossy(&o.stdout);
+                    let mut name = String::new();
+                    let mut version = String::new();
+                    let mut size = String::new();
+                    let mut required_by = String::new();
+
+                    for line in info.lines() {
+                        if let Some(colon) = line.find(':') {
+                            let key = line[..colon].trim();
+                            let val = line[colon + 1..].trim();
+                            match key {
+                                "Name" | "名称" | "名字" => name = val.to_string(),
+                                "Version" | "版本" => version = val.to_string(),
+                                "Installed Size" | "安装大小" | "安装后大小" => {
+                                    size = val.to_string()
+                                }
+                                "Required By" | "依赖它" => {
+                                    required_by = val.to_string()
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+
+                    lines.push(format!("  {} {}", name, version));
+                    if !size.is_empty() {
+                        lines.push(format!("    大小: {}", size));
+                    }
+                    if !required_by.is_empty() && required_by != "None" && required_by != "无" {
+                        lines.push(format!("    ⚠ 被依赖: {}", required_by));
+                    }
+                    lines.push(String::new());
+                } else {
+                    lines.push(format!("  {} (未找到包信息)", pkg));
+                    lines.push(String::new());
+                }
+            }
+        }
+
+        // 用 pacman -Rns --print 获取完整移除列表（含依赖）
         let mut args = vec!["-Rns".to_string(), "--print".to_string()];
         args.extend(packages.iter().cloned());
 
         let output = Command::new("pacman").args(&args).output();
 
-        match output {
-            Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout)
-                .lines()
-                .map(|s| format!("  {}", s))
-                .collect(),
-            Ok(o) => {
-                // pacman --print 在 stderr 输出警告/错误
-                let stderr = String::from_utf8_lossy(&o.stderr);
-                let mut lines = vec!["  预览失败:".to_string()];
-                for line in stderr.lines() {
-                    lines.push(format!("  {}", line));
+        if let Ok(o) = output {
+            if o.status.success() {
+                let stdout = String::from_utf8_lossy(&o.stdout);
+                let remove_list: Vec<&str> = stdout.lines().collect();
+                if !remove_list.is_empty() {
+                    lines.push(format!(
+                        "将移除以下 {} 个包（含孤立依赖）:",
+                        remove_list.len()
+                    ));
+                    for l in &remove_list {
+                        lines.push(format!("  {}", l));
+                    }
                 }
-                lines
-            }
-            Err(e) => {
-                vec![format!("  执行预览失败: {}", e)]
+            } else {
+                // --print 可能在某些场景下失败，尝试不带 -s
+                let mut args2 = vec!["-Rn".to_string(), "--print".to_string()];
+                args2.extend(packages.iter().cloned());
+                if let Ok(o2) = Command::new("pacman").args(&args2).output() {
+                    if o2.status.success() {
+                        let stdout = String::from_utf8_lossy(&o2.stdout);
+                        let remove_list: Vec<&str> = stdout.lines().collect();
+                        if !remove_list.is_empty() {
+                            lines.push(format!("将移除以下 {} 个包:", remove_list.len()));
+                            for l in &remove_list {
+                                lines.push(format!("  {}", l));
+                            }
+                        }
+                    }
+                }
             }
         }
+
+        lines
     }
 }
 
