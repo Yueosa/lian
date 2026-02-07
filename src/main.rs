@@ -7,13 +7,7 @@ mod sysinfo;
 mod tui;
 
 use anyhow::Result;
-use clap::Parser;
 use std::process::Command;
-
-/// 基于 AI 的 TUI 包管理器
-#[derive(Parser)]
-#[command(name = "lian", version, about)]
-struct Cli {}
 
 /// 预先验证 sudo 权限，确保 TUI 运行时不需要交互输入密码
 fn validate_sudo() -> Result<()> {
@@ -36,8 +30,6 @@ fn validate_sudo() -> Result<()> {
 #[tokio::main]
 async fn main() -> Result<()> {
     env_logger::init();
-
-    let cli = Cli::parse();
 
     // 加载配置
     let config = config::Config::load_or_default()?;
