@@ -1,4 +1,4 @@
-use crate::package_manager::{PackageManager, UpdateOutput};
+use crate::package_manager::{PackageDetail, PackageInfo, PackageManager, UpdateOutput};
 use crate::sysinfo::SystemInfo;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -28,6 +28,18 @@ pub enum ViewMode {
     AIAnalysis,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum QueryPanel {
+    Local,
+    Remote,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum QueryView {
+    List,
+    Detail,
+}
+
 #[derive(Debug)]
 pub enum AppEvent {
     PackageManagerDetected(PackageManager),
@@ -42,6 +54,12 @@ pub enum AppEvent {
     ReportSaved(String),
     Error(String),
     InstalledCount(usize),
+    QueryLocalResults(Vec<PackageInfo>),
+    QueryRemoteResults(Vec<PackageInfo>),
+    QueryDetailLoaded {
+        detail: PackageDetail,
+        files: Vec<String>,
+    },
 }
 
 pub struct App {
@@ -61,6 +79,19 @@ pub struct App {
     pub should_quit: bool,
     pub saved_report_path: Option<String>,
     pub installed_count: Option<usize>,
+    // 查询相关状态
+    pub query_input: String,
+    pub query_cursor: usize,
+    pub query_panel: QueryPanel,
+    pub query_view: QueryView,
+    pub query_local_results: Vec<PackageInfo>,
+    pub query_remote_results: Vec<PackageInfo>,
+    pub query_local_selected: usize,
+    pub query_remote_selected: usize,
+    pub query_detail: Option<PackageDetail>,
+    pub query_files: Vec<String>,
+    pub query_detail_scroll: usize,
+    pub query_searching: bool,
 }
 
 impl App {
@@ -82,6 +113,19 @@ impl App {
             should_quit: false,
             saved_report_path: None,
             installed_count: None,
+            // 查询
+            query_input: String::new(),
+            query_cursor: 0,
+            query_panel: QueryPanel::Local,
+            query_view: QueryView::List,
+            query_local_results: Vec::new(),
+            query_remote_results: Vec::new(),
+            query_local_selected: 0,
+            query_remote_selected: 0,
+            query_detail: None,
+            query_files: Vec::new(),
+            query_detail_scroll: 0,
+            query_searching: false,
         }
     }
 
@@ -185,5 +229,21 @@ impl App {
         self.error_message = None;
         self.scroll_offset = 0;
         self.saved_report_path = None;
+    }
+
+    /// 重置查询相关状态
+    pub fn reset_query_state(&mut self) {
+        self.query_input.clear();
+        self.query_cursor = 0;
+        self.query_panel = QueryPanel::Local;
+        self.query_view = QueryView::List;
+        self.query_local_results.clear();
+        self.query_remote_results.clear();
+        self.query_local_selected = 0;
+        self.query_remote_selected = 0;
+        self.query_detail = None;
+        self.query_files.clear();
+        self.query_detail_scroll = 0;
+        self.query_searching = false;
     }
 }

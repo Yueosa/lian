@@ -1,4 +1,5 @@
 mod dashboard;
+pub mod input;
 mod install;
 mod layout;
 mod query;
