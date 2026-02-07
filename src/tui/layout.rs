@@ -1,5 +1,5 @@
 use ratatui::{
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::{Alignment, Constraint, Direction, Layout, Margin, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
@@ -30,7 +30,7 @@ pub fn render_header(f: &mut Frame, title: &str, area: Rect) {
 
 /// 渲染通用 footer
 pub fn render_footer(f: &mut Frame, text: &str, area: Rect) {
-    let footer = Paragraph::new(text)
+    let footer = Paragraph::new(format!(" {}", text))
         .style(Style::default().fg(Color::Green))
         .block(Block::default().borders(Borders::ALL))
         .alignment(Alignment::Left);
@@ -46,12 +46,21 @@ pub fn render_scrollable_content(
     area: Rect,
 ) {
     let block = Block::default()
-        .title(title)
+        .title(format!(" {} ", title))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Yellow));
 
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    // 内部水平边距
+    let padded = inner.inner(Margin {
+        horizontal: 1,
+        vertical: 0,
+    });
+
     let total_lines = lines.len();
-    let visible_height = area.height.saturating_sub(2) as usize;
+    let visible_height = padded.height as usize;
     let max_scroll = total_lines.saturating_sub(visible_height);
     let actual_scroll = scroll_offset.min(max_scroll);
 
@@ -63,10 +72,9 @@ pub fn render_scrollable_content(
         .collect();
 
     let paragraph = Paragraph::new(visible_content)
-        .block(block)
         .wrap(ratatui::widgets::Wrap { trim: false });
 
-    f.render_widget(paragraph, area);
+    f.render_widget(paragraph, padded);
 
     // 滚动条
     if total_lines > visible_height {
@@ -78,7 +86,7 @@ pub fn render_scrollable_content(
 
         f.render_stateful_widget(
             scrollbar,
-            area.inner(ratatui::layout::Margin {
+            area.inner(Margin {
                 horizontal: 0,
                 vertical: 1,
             }),
