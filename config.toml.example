@@ -34,3 +34,10 @@ temperature = 0.8
 # 报告会按照 YYYY/MM/DD/HH-mm.md 的格式保存
 # 支持使用环境变量，例如 "$HOME/.lian/pacman"
 report_dir = "/home/your-username/.lian/pacman"
+
+# AI 分析开关
+# 控制哪些操作完成后自动进行 AI 分析
+[ai]
+update = true      # 系统更新后 AI 分析 (默认开启)
+install = false    # 安装软件包后 AI 分析 (默认关闭)
+remove = false     # 卸载软件包后 AI 分析 (默认关闭)
