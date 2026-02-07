@@ -1,9 +1,9 @@
 #!/bin/bash
-# Lian-Pacman 快速安装脚本
+# lian 快速安装脚本
 
 set -e
 
-echo "🚀 Lian-Pacman 安装脚本"
+echo "🚀 lian 安装脚本"
 echo "========================"
 echo ""
 
@@ -33,7 +33,7 @@ echo ""
 
 # 安装到系统
 echo "📥 安装到系统..."
-INSTALL_PATH="/usr/local/bin/lian-pacman"
+INSTALL_PATH="/usr/local/bin/lian"
 
 if [ -f "$INSTALL_PATH" ]; then
     echo "⚠️  检测到已存在的安装: $INSTALL_PATH"
@@ -45,29 +45,29 @@ if [ -f "$INSTALL_PATH" ]; then
     fi
 fi
 
-sudo cp target/release/lian-pacman "$INSTALL_PATH"
+sudo cp target/release/lian "$INSTALL_PATH"
 sudo chmod +x "$INSTALL_PATH"
 
 echo "✅ 已安装到: $INSTALL_PATH"
 echo ""
 
 # 检查 API Key
-if [ -z "$LIAN_PACMAN_AI_KEY" ]; then
-    echo "⚠️  未检测到 LIAN_PACMAN_AI_KEY 环境变量"
+if [ -z "$LIAN_AI_KEY" ]; then
+    echo "⚠️  未检测到 LIAN_AI_KEY 环境变量"
     echo ""
     echo "请设置你的 AI API Key:"
-    echo "  export LIAN_PACMAN_AI_KEY='your-api-key-here'"
+    echo "  export LIAN_AI_KEY='your-api-key-here'"
     echo ""
     echo "建议添加到 ~/.zshrc 或 ~/.bashrc:"
-    echo "  echo 'export LIAN_PACMAN_AI_KEY=\"your-api-key\"' >> ~/.zshrc"
+    echo "  echo 'export LIAN_AI_KEY=\"your-api-key\"' >> ~/.zshrc"
     echo ""
     echo "也可以在配置文件中设置 api_key 字段 (优先级更高)"
 else
-    echo "✅ 检测到 LIAN_PACMAN_AI_KEY"
+    echo "✅ 检测到 LIAN_AI_KEY"
 fi
 
 # 创建配置目录
-CONFIG_DIR="$HOME/.config/lian-pacman"
+CONFIG_DIR="$HOME/.config/lian"
 if [ ! -d "$CONFIG_DIR" ]; then
     mkdir -p "$CONFIG_DIR"
     echo "✅ 已创建配置目录: $CONFIG_DIR"
@@ -76,13 +76,13 @@ fi
 # 创建示例配置文件
 if [ ! -f "$CONFIG_DIR/config.toml" ]; then
     cat > "$CONFIG_DIR/config.toml" << 'EOF'
-# Lian-Pacman 配置文件
+# lian 配置文件
 
 # AI API 地址 (可选，默认为 DeepSeek)
 # 兼容 OpenAI 格式的 API 均可使用
 # api_url = "https://api.deepseek.com/chat/completions"
 
-# AI API Key (可选，优先级高于环境变量 LIAN_PACMAN_AI_KEY)
+# AI API Key (可选，优先级高于环境变量 LIAN_AI_KEY)
 # api_key = "sk-your-key-here"
 
 # HTTP 代理 (可选，支持 http/https/socks5)
@@ -116,17 +116,14 @@ echo "🎉 安装完成!"
 echo ""
 echo "使用方法:"
 echo "  1. 设置 API Key (如果还没设置):"
-echo "     export LIAN_PACMAN_AI_KEY='your-api-key'"
+echo "     export LIAN_AI_KEY='your-api-key'"
 echo "     或在配置文件中设置 api_key 字段"
 echo ""
 echo "  2. 运行程序:"
-echo "     lian-pacman"
+echo "     lian"
 echo ""
-echo "  3. 测试模式 (不执行真实更新):"
-echo "     lian-pacman --test"
-echo ""
-echo "  4. 查看帮助:"
-echo "     lian-pacman --help"
+echo "  3. 查看帮助:"
+echo "     lian --help"
 echo ""
 echo "配置文件位置: $CONFIG_DIR/config.toml"
 echo "报告保存位置: $HOME/.lian/pacman/"

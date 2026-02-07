@@ -3,7 +3,7 @@
 
 set -e
 
-PROJECT_NAME="lian-pacman"
+PROJECT_NAME="lian"
 VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
 TEST_DIR="test"
 BINARY="target/release/$PROJECT_NAME"
