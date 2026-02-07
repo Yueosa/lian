@@ -83,14 +83,16 @@ impl Default for Config {
 impl Config {
     pub fn load_or_default() -> Result<Self> {
         let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-        let config_path = PathBuf::from(home).join(".config/lian/config.toml");
+        let config_path = PathBuf::from(&home).join(".config/lian/config.toml");
 
         if config_path.exists() {
             let content = fs::read_to_string(&config_path)?;
             let config: Config = toml::from_str(&content)?;
             Ok(config)
         } else {
-            Ok(Self::default())
+            let config = Self::default();
+            config.save()?;
+            Ok(config)
         }
     }
 

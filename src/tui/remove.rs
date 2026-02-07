@@ -406,7 +406,7 @@ pub fn handle_remove_analysis_complete(
     let tx_clone = tx.clone();
     tokio::spawn(async move {
         let saver = crate::report::ReportSaver::new(report_dir);
-        match saver.save(&analysis, &distro_name) {
+        match saver.save(&analysis, &distro_name, "Rns") {
             Ok(path) => {
                 let _ = tx_clone
                     .send(AppEvent::ReportSaved(path.display().to_string()))
