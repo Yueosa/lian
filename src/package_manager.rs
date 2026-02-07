@@ -58,6 +58,19 @@ impl PackageManager {
         &self.command
     }
 
+    /// 获取已安装包数量
+    pub fn count_installed(&self) -> usize {
+        Command::new("pacman")
+            .args(["-Q"])
+            .output()
+            .map(|o| {
+                String::from_utf8_lossy(&o.stdout)
+                    .lines()
+                    .count()
+            })
+            .unwrap_or(0)
+    }
+
     /// 获取当前已安装的显式安装包列表
     pub fn get_explicit_packages(&self) -> Result<String> {
         let output = Command::new("pacman")
