@@ -133,9 +133,8 @@ pub fn generate_update_diff(before: Option<&str>, after: Option<&str>) -> String
     lines.join("\n")
 }
 
-/// 启动更新异步任务（保留用于可能的后台更新模式）
-#[allow(dead_code)]
-fn spawn_update_task(app: &mut App, tx: &mpsc::Sender<AppEvent>) {
+/// 启动更新异步任务
+pub fn spawn_update_task(app: &mut App, tx: &mpsc::Sender<AppEvent>) {
     let pm = match app.package_manager.clone() {
         Some(pm) => pm,
         None => return,
@@ -281,6 +280,7 @@ fn render_update_header(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let title = match app.state {
         AppState::PackageManagerCheck => "🔍 检测包管理器...",
         AppState::PreUpdate => "📦 准备更新系统",
+        AppState::PreviewingUpdates => "📝 可用更新列表",
         AppState::Updating => "⚙️  正在更新系统...",
         AppState::UpdateComplete => "✅ 更新完成",
         AppState::Analyzing => "🤖 AI 分析中...",
@@ -320,7 +320,14 @@ fn render_update_footer(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let owned_text: String;
     let footer_text = match app.state {
         AppState::PackageManagerCheck => "请稍候...",
-        AppState::PreUpdate => "按 Enter 开始更新 | Esc 返回主页 | q 退出",
+        AppState::PreUpdate => "按 Enter 检查可用更新 | Esc 返回主页 | q 退出",
+        AppState::PreviewingUpdates => {
+            if app.update_preview.is_empty() {
+                "Esc 返回 | q 退出"
+            } else {
+                "按 Enter 开始更新 | Esc 返回 | ↑↓ 滚动"
+            }
+        }
         AppState::Updating => {
             if app.update_progress.is_empty() {
                 "更新进行中..."

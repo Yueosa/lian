@@ -99,9 +99,17 @@ pub async fn run(api_key: String, config: Config) -> Result<()> {
                         match app.mode {
                             AppMode::Dashboard => {}
                             AppMode::Update => {
-                                crate::package_manager::cancel_update();
-                                app.mode = AppMode::Dashboard;
-                                app.reset_scroll();
+                                if app.state == AppState::PreviewingUpdates {
+                                    // Esc 从预览回到 PreUpdate
+                                    app.state = AppState::PreUpdate;
+                                    app.update_preview.clear();
+                                    app.update_lines.clear();
+                                    app.reset_scroll();
+                                } else {
+                                    crate::package_manager::cancel_update();
+                                    app.mode = AppMode::Dashboard;
+                                    app.reset_scroll();
+                                }
                             }
                             AppMode::Query => {
                                 // Query 模式自己处理 Esc（详情→列表→Dashboard）
@@ -152,27 +160,31 @@ pub async fn run(api_key: String, config: Config) -> Result<()> {
                         match app.mode {
                             AppMode::Update => {
                                 if key.code == KeyCode::Enter && app.state == AppState::PreUpdate {
+                                    // 第 1 次 Enter：检查可用更新
                                     if let Some(pm) = app.package_manager.clone() {
-                                        match run_update_foreground(&mut terminal, &pm) {
-                                            Ok((success, packages_before, packages_after)) => {
-                                                let diff_summary = update::generate_update_diff(
-                                                    packages_before.as_deref(),
-                                                    packages_after.as_deref(),
-                                                );
-                                                app.update_output = Some(crate::package_manager::UpdateOutput {
-                                                    stdout: diff_summary,
-                                                    stderr: String::new(),
-                                                    success,
-                                                });
-                                                app.packages_before = packages_before;
-                                                app.packages_after = packages_after;
-                                                app.state = AppState::UpdateComplete;
-                                                update::handle_update_complete(&mut app, &tx, &api_key, &config);
-                                            }
-                                            Err(e) => {
-                                                app.error_message = Some(format!("{}", e));
-                                                app.state = AppState::Error;
-                                            }
+                                        app.update_lines.clear();
+                                        app.update_lines.push("正在检查可用更新...".to_string());
+                                        let tx_clone = tx.clone();
+                                        tokio::spawn(async move {
+                                            let updates = tokio::task::spawn_blocking(move || pm.check_updates())
+                                                .await
+                                                .unwrap_or_default();
+                                            let _ = tx_clone.send(AppEvent::UpdatePreviewReady(updates)).await;
+                                        });
+                                    }
+                                } else if key.code == KeyCode::Enter && app.state == AppState::PreviewingUpdates {
+                                    // 第 2 次 Enter：sudo 鉴权 + 开始更新
+                                    match validate_sudo_tui(&mut terminal) {
+                                        Ok(true) => {
+                                            update::spawn_update_task(&mut app, &tx);
+                                        }
+                                        Ok(false) => {
+                                            app.error_message = Some("sudo 验证失败，请确保你有 sudo 权限".to_string());
+                                            app.state = AppState::Error;
+                                        }
+                                        Err(e) => {
+                                            app.error_message = Some(format!("sudo 验证出错: {}", e));
+                                            app.state = AppState::Error;
                                         }
                                     }
                                 } else {
@@ -261,11 +273,28 @@ pub async fn run(api_key: String, config: Config) -> Result<()> {
                     app.query_remote_selected = 0;
                     app.query_searching = false;
                 }
-                AppEvent::QueryDetailLoaded { detail, files } => {
+                AppEvent::QueryDetailLoaded { detail, files, dirs } => {
                     app.query_detail = Some(detail);
                     app.query_files = files;
+                    app.query_dirs = dirs;
+                    app.query_file_mode = state::FileListMode::Files;
                     app.query_detail_scroll = 0;
                     app.query_view = state::QueryView::Detail;
+                }
+                AppEvent::UpdatePreviewReady(updates) => {
+                    app.update_preview = updates;
+                    app.update_lines.clear();
+                    if app.update_preview.is_empty() {
+                        app.update_lines.push("系统已是最新，没有可用更新。".to_string());
+                    } else {
+                        app.update_lines.push(format!("找到 {} 个可用更新：", app.update_preview.len()));
+                        app.update_lines.push(String::new());
+                        for pkg in &app.update_preview {
+                            app.update_lines.push(format!("  {}", pkg));
+                        }
+                    }
+                    app.state = AppState::PreviewingUpdates;
+                    app.reset_scroll();
                 }
             }
         }

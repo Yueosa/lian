@@ -71,6 +71,35 @@ impl PackageManager {
             .unwrap_or(0)
     }
 
+    /// 检查可用更新（不实际执行更新）
+    pub fn check_updates(&self) -> Vec<String> {
+        // 优先尝试 checkupdates（pacman-contrib 提供）
+        let output = Command::new("checkupdates").output();
+        if let Ok(o) = &output {
+            if o.status.success() {
+                return String::from_utf8_lossy(&o.stdout)
+                    .lines()
+                    .map(|s| s.to_string())
+                    .collect();
+            }
+        }
+        // 回退到 pacman -Qu / paru -Qu / yay -Qu
+        let output = if self.command == "pacman" {
+            Command::new("pacman").args(["-Qu"]).output()
+        } else {
+            Command::new(&self.command).args(["-Qu"]).output()
+        };
+        match output {
+            Ok(o) if o.status.success() => {
+                String::from_utf8_lossy(&o.stdout)
+                    .lines()
+                    .map(|s| s.to_string())
+                    .collect()
+            }
+            _ => Vec::new(),
+        }
+    }
+
     /// 获取当前已安装的显式安装包列表
     pub fn get_explicit_packages(&self) -> Result<String> {
         let output = Command::new("pacman")
@@ -405,6 +434,33 @@ impl PackageManager {
                                 None
                             } else {
                                 Some(path.to_string())
+                            }
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// 获取已安装包的目录列表（最底层目录） (pacman -Ql)
+    pub fn package_dirs(&self, name: &str) -> Vec<String> {
+        let output = Command::new("pacman")
+            .args(["-Ql", name])
+            .output();
+        match output {
+            Ok(o) if o.status.success() => {
+                String::from_utf8_lossy(&o.stdout)
+                    .lines()
+                    .filter_map(|line| {
+                        if let Some(pos) = line.find(' ') {
+                            let path = &line[pos + 1..];
+                            if path.ends_with('/') {
+                                Some(path.to_string())
+                            } else {
+                                None
                             }
                         } else {
                             None

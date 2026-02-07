@@ -15,6 +15,7 @@ pub enum AppMode {
 pub enum AppState {
     PackageManagerCheck,
     PreUpdate,
+    PreviewingUpdates,
     Updating,
     UpdateComplete,
     Analyzing,
@@ -40,6 +41,12 @@ pub enum QueryView {
     Detail,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum FileListMode {
+    Files,
+    Directories,
+}
+
 #[derive(Debug)]
 pub enum AppEvent {
     PackageManagerDetected(PackageManager),
@@ -59,7 +66,9 @@ pub enum AppEvent {
     QueryDetailLoaded {
         detail: PackageDetail,
         files: Vec<String>,
+        dirs: Vec<String>,
     },
+    UpdatePreviewReady(Vec<String>),
 }
 
 pub struct App {
@@ -90,8 +99,12 @@ pub struct App {
     pub query_remote_selected: usize,
     pub query_detail: Option<PackageDetail>,
     pub query_files: Vec<String>,
+    pub query_dirs: Vec<String>,
+    pub query_file_mode: FileListMode,
     pub query_detail_scroll: usize,
     pub query_searching: bool,
+    // 更新预览
+    pub update_preview: Vec<String>,
 }
 
 impl App {
@@ -124,8 +137,11 @@ impl App {
             query_remote_selected: 0,
             query_detail: None,
             query_files: Vec::new(),
+            query_dirs: Vec::new(),
+            query_file_mode: FileListMode::Files,
             query_detail_scroll: 0,
             query_searching: false,
+            update_preview: Vec::new(),
         }
     }
 
@@ -229,6 +245,7 @@ impl App {
         self.error_message = None;
         self.scroll_offset = 0;
         self.saved_report_path = None;
+        self.update_preview.clear();
     }
 
     /// 重置查询相关状态
@@ -243,6 +260,8 @@ impl App {
         self.query_remote_selected = 0;
         self.query_detail = None;
         self.query_files.clear();
+        self.query_dirs.clear();
+        self.query_file_mode = FileListMode::Files;
         self.query_detail_scroll = 0;
         self.query_searching = false;
     }
