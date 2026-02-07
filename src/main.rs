@@ -10,14 +10,10 @@ use anyhow::Result;
 use clap::Parser;
 use std::process::Command;
 
-/// 有 AI 自动总结的 Syu
+/// 基于 AI 的 TUI 包管理器
 #[derive(Parser)]
-#[command(name = "lian-pacman", version, about)]
-struct Cli {
-    /// 测试模式，模拟更新输出
-    #[arg(short, long)]
-    test: bool,
-}
+#[command(name = "lian", version, about)]
+struct Cli {}
 
 /// 预先验证 sudo 权限，确保 TUI 运行时不需要交互输入密码
 fn validate_sudo() -> Result<()> {
@@ -48,22 +44,17 @@ async fn main() -> Result<()> {
 
     // API Key 优先级：配置文件 > 环境变量
     let api_key = config.api_key.clone()
-        .or_else(|| std::env::var("LIAN_PACMAN_AI_KEY").ok())
+        .or_else(|| std::env::var("LIAN_AI_KEY").ok())
         .unwrap_or_else(|| {
             eprintln!("错误: 未设置 AI API Key");
-            eprintln!("请在配置文件 ~/.config/lian-pacman/config.toml 中设置 api_key");
-            eprintln!("或设置环境变量: export LIAN_PACMAN_AI_KEY='your-api-key'");
+            eprintln!("请在配置文件 ~/.config/lian/config.toml 中设置 api_key");
+            eprintln!("或设置环境变量: export LIAN_AI_KEY='your-api-key'");
             std::process::exit(1);
         });
 
-    if cli.test {
-        println!("🧪 测试模式：将模拟更新输出");
-        println!();
-    } else {
-        validate_sudo()?;
-    }
+    validate_sudo()?;
 
-    tui::run(api_key, config, cli.test).await?;
+    tui::run(api_key, config).await?;
 
     Ok(())
 }
