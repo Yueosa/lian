@@ -1,7 +1,7 @@
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Margin, Rect},
     style::{Color, Modifier, Style},
-    text::{Line, Span},
+    text::Line,
     widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
     Frame,
 };
@@ -93,37 +93,6 @@ pub fn render_scrollable_content(
             &mut scrollbar_state,
         );
     }
-}
-
-/// 渲染 "开发中" 占位页面
-pub fn render_placeholder(f: &mut Frame, mode_name: &str, area: Rect) {
-    let chunks = main_layout(area);
-
-    render_header(f, &format!("📦 {mode_name}"), chunks[0]);
-
-    let placeholder_lines = vec![
-        Line::from(""),
-        Line::from(""),
-        Line::from(""),
-        Line::from(vec![Span::styled(
-            "🚧 开发中...",
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        )]),
-        Line::from(""),
-        Line::from(vec![Span::styled(
-            format!("{mode_name}功能将在后续版本中实现"),
-            Style::default().fg(Color::DarkGray),
-        )]),
-    ];
-
-    let content = Paragraph::new(placeholder_lines)
-        .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::Yellow)))
-        .alignment(Alignment::Center);
-    f.render_widget(content, chunks[1]);
-
-    render_footer(f, "Esc 返回主页 | q 退出", chunks[2]);
 }
 
 /// 估算内容区域可见行数（总高度减去 header/footer/borders）

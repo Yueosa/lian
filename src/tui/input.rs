@@ -30,31 +30,6 @@ impl InputBox {
         self.cursor += 1;
     }
 
-    /// Backspace: 删除光标前的字符
-    pub fn delete_back(&mut self) {
-        if self.cursor > 0 {
-            self.cursor -= 1;
-            let byte_pos = self.char_to_byte_pos(self.cursor);
-            let next_byte_pos = self.char_to_byte_pos(self.cursor + 1);
-            self.content.drain(byte_pos..next_byte_pos);
-        }
-    }
-
-    /// Delete: 删除光标后的字符
-    pub fn delete_forward(&mut self) {
-        let char_count = self.content.chars().count();
-        if self.cursor < char_count {
-            let byte_pos = self.char_to_byte_pos(self.cursor);
-            let next_byte_pos = self.char_to_byte_pos(self.cursor + 1);
-            self.content.drain(byte_pos..next_byte_pos);
-        }
-    }
-
-    /// 光标左移
-    pub fn move_left(&mut self) {
-        self.cursor = self.cursor.saturating_sub(1);
-    }
-
     /// 光标右移
     pub fn move_right(&mut self) {
         let char_count = self.content.chars().count();
@@ -65,17 +40,6 @@ impl InputBox {
 
     /// 光标移到行首
     pub fn move_home(&mut self) {
-        self.cursor = 0;
-    }
-
-    /// 光标移到行尾
-    pub fn move_end(&mut self) {
-        self.cursor = self.content.chars().count();
-    }
-
-    /// 清空内容
-    pub fn clear(&mut self) {
-        self.content.clear();
         self.cursor = 0;
     }
 

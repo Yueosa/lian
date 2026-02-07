@@ -182,10 +182,6 @@ pub async fn run(api_key: String, config: Config) -> Result<()> {
                                     &mut app,
                                 );
                             }
-                            _ => {
-                                app.mode = AppMode::Dashboard;
-                                app.reset_scroll();
-                            }
                         }
                     }
                     // 模式切换快捷键 (Shift + 字母)

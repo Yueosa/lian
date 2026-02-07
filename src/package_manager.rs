@@ -795,7 +795,6 @@ pub struct PackageInfo {
 #[derive(Debug, Clone)]
 pub struct PackageDetail {
     pub fields: Vec<(String, String)>,
-    pub raw_output: String,
 }
 
 impl PackageManager {
@@ -986,6 +985,5 @@ fn parse_package_detail(output: &str) -> PackageDetail {
 
     PackageDetail {
         fields,
-        raw_output: output.to_string(),
     }
 }
