@@ -3,19 +3,26 @@ mod deepseek;
 mod package_manager;
 mod prompt;
 mod report;
+mod sysinfo;
 mod tui;
 
 use anyhow::Result;
-use std::env;
+use clap::Parser;
 use std::process::Command;
+
+/// 有 AI 自动总结的 Syu
+#[derive(Parser)]
+#[command(name = "lian-pacman", version, about)]
+struct Cli {
+    /// 测试模式，模拟更新输出
+    #[arg(short, long)]
+    test: bool,
+}
 
 /// 预先验证 sudo 权限，确保 TUI 运行时不需要交互输入密码
 fn validate_sudo() -> Result<()> {
     println!("🔐 验证 sudo 权限...");
-    println!("   (paru/yay/pacman 更新需要 sudo 权限)");
-    println!();
     
-    // 运行 sudo -v 来验证/刷新 sudo 凭据
     let status = Command::new("sudo")
         .arg("-v")
         .status()?;
@@ -34,30 +41,29 @@ fn validate_sudo() -> Result<()> {
 async fn main() -> Result<()> {
     env_logger::init();
 
-    // 检查是否为测试模式
-    let args: Vec<String> = env::args().collect();
-    let test_mode = args.iter().any(|a| a == "--test" || a == "-t");
-
-    // 检查 API key
-    let api_key = env::var("DEEPSEEK_API_KEY").unwrap_or_else(|_| {
-        eprintln!("错误: 未设置 DEEPSEEK_API_KEY 环境变量");
-        eprintln!("请运行: export DEEPSEEK_API_KEY='your-api-key'");
-        std::process::exit(1);
-    });
+    let cli = Cli::parse();
 
     // 加载配置
     let config = config::Config::load_or_default()?;
 
-    if test_mode {
+    // API Key 优先级：配置文件 > 环境变量
+    let api_key = config.api_key.clone()
+        .or_else(|| std::env::var("LIAN_PACMAN_AI_KEY").ok())
+        .unwrap_or_else(|| {
+            eprintln!("错误: 未设置 AI API Key");
+            eprintln!("请在配置文件 ~/.config/lian-pacman/config.toml 中设置 api_key");
+            eprintln!("或设置环境变量: export LIAN_PACMAN_AI_KEY='your-api-key'");
+            std::process::exit(1);
+        });
+
+    if cli.test {
         println!("🧪 测试模式：将模拟更新输出");
         println!();
     } else {
-        // 预先验证 sudo 权限
         validate_sudo()?;
     }
 
-    // 启动 TUI
-    tui::run(api_key, config, test_mode).await?;
+    tui::run(api_key, config, cli.test).await?;
 
     Ok(())
 }

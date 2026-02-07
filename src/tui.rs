@@ -1,8 +1,9 @@
 use crate::config::Config;
-use crate::deepseek::DeepSeekClient;
+use crate::deepseek::AiClient;
 use crate::package_manager::{PackageManager, UpdateOutput};
 use crate::prompt;
 use crate::report::ReportSaver;
+use crate::sysinfo::SystemInfo;
 use anyhow::Result;
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers},
@@ -41,8 +42,10 @@ struct App {
     state: AppState,
     view_mode: ViewMode,
     package_manager: Option<PackageManager>,
+    system_info: Option<SystemInfo>,
     update_output: Option<UpdateOutput>,
-    update_lines: Vec<String>,  // 实时更新的输出行
+    update_lines: Vec<String>,
+    update_progress: String,
     packages_before: Option<String>,
     packages_after: Option<String>,
     analysis_result: Option<String>,
@@ -59,8 +62,10 @@ impl App {
             state: AppState::PackageManagerCheck,
             view_mode: ViewMode::UpdateLog,
             package_manager: None,
+            system_info: None,
             update_output: None,
             update_lines: Vec::new(),
+            update_progress: String::new(),
             packages_before: None,
             packages_after: None,
             analysis_result: None,
@@ -126,10 +131,45 @@ impl App {
     }
 
     fn add_update_line(&mut self, line: String) {
+        // 解析进度信息
+        self.parse_progress(&line);
         self.update_lines.push(line);
         // 自动滚动到底部
         if self.update_lines.len() > 1 {
             self.scroll_offset = self.update_lines.len().saturating_sub(1);
+        }
+    }
+
+    /// 从输出行中解析进度信息
+    fn parse_progress(&mut self, line: &str) {
+        let trimmed = line.trim();
+        // 解析 "( 3/12) upgrading xxx" 或 "(3/12) checking xxx" 等格式
+        if trimmed.starts_with('(') {
+            if let Some(end) = trimmed.find(')') {
+                let inner = &trimmed[1..end].trim();
+                if inner.contains('/') {
+                    // 提取操作名称
+                    let rest = trimmed[end+1..].trim();
+                    let action = rest.split_whitespace().next().unwrap_or("");
+                    self.update_progress = format!("[{action}] {inner}");
+                    return;
+                }
+            }
+        }
+        // 解析网速信息: "xxx MiB/s" 或 "xxx KiB/s"
+        if let Some(speed_pos) = trimmed.find("iB/s") {
+            // 向前找速度值
+            let before = &trimmed[..speed_pos + 4];
+            if let Some(last_space) = before.rfind([' ', '\t']) {
+                let speed = before[last_space..].trim();
+                if !speed.is_empty() {
+                    self.update_progress = format!("下载中... {speed}");
+                }
+            }
+        }
+        // :: 这种行是状态描述
+        if trimmed.starts_with("::") {
+            self.update_progress = trimmed.trim_start_matches(':').trim().to_string();
         }
     }
 }
@@ -162,6 +202,15 @@ pub async fn run(api_key: String, config: Config, test_mode: bool) -> Result<()>
                     .await;
             }
         }
+    });
+
+    // 异步获取系统信息
+    let tx_clone = tx.clone();
+    tokio::spawn(async move {
+        let info = tokio::task::spawn_blocking(SystemInfo::detect)
+            .await
+            .unwrap_or_else(|_| SystemInfo::detect());
+        let _ = tx_clone.send(AppEvent::SystemInfoDetected(info)).await;
     });
 
     // 主循环
@@ -203,15 +252,16 @@ pub async fn run(api_key: String, config: Config, test_mode: bool) -> Result<()>
                     }
                     KeyCode::Down | KeyCode::Char('j') => {
                         let content = app.get_current_content();
-                        // 估算可见高度（终端高度减去边框和其他UI元素）
-                        app.scroll_down(content.len(), 20);
+                        let visible = term_size.height.saturating_sub(8) as usize;
+                        app.scroll_down(content.len(), visible);
                     }
                     KeyCode::PageUp => {
                         app.scroll_page_up(10);
                     }
                     KeyCode::PageDown => {
                         let content = app.get_current_content();
-                        app.scroll_page_down(10, content.len(), 20);
+                        let visible = term_size.height.saturating_sub(8) as usize;
+                        app.scroll_page_down(10, content.len(), visible);
                     }
                     KeyCode::Enter => {
                         if app.state == AppState::PreUpdate {
@@ -230,27 +280,18 @@ pub async fn run(api_key: String, config: Config, test_mode: bool) -> Result<()>
 
                             // 使用 std thread 运行阻塞的更新操作
                             std::thread::spawn(move || {
-                                // 获取更新前的包列表
                                 let packages_before = pm.get_explicit_packages().ok();
 
-                                // 创建输出通道
                                 let (output_tx, mut output_rx) = tokio::sync::mpsc::unbounded_channel();
 
-                                // 在另一个线程中转发输出到主事件通道
+                                // 转发输出行到主事件通道
                                 let tx_for_lines = tx_clone.clone();
                                 std::thread::spawn(move || {
-                                    let rt = tokio::runtime::Builder::new_current_thread()
-                                        .enable_all()
-                                        .build()
-                                        .unwrap();
-                                    rt.block_on(async {
-                                        while let Some(line) = output_rx.recv().await {
-                                            let _ = tx_for_lines.send(AppEvent::UpdateLine(line)).await;
-                                        }
-                                    });
+                                    while let Some(line) = output_rx.blocking_recv() {
+                                        let _ = tx_for_lines.blocking_send(AppEvent::UpdateLine(line));
+                                    }
                                 });
 
-                                // 执行更新（流式输出）或模拟
                                 let result = if is_test_mode {
                                     pm.mock_update(output_tx)
                                 } else {
@@ -259,33 +300,17 @@ pub async fn run(api_key: String, config: Config, test_mode: bool) -> Result<()>
                                 
                                 match result {
                                     Ok(output) => {
-                                        // 获取更新后的包列表
                                         let packages_after = pm.get_explicit_packages().ok();
-
-                                        let rt = tokio::runtime::Builder::new_current_thread()
-                                            .enable_all()
-                                            .build()
-                                            .unwrap();
-                                        rt.block_on(async {
-                                            let _ = tx_clone
-                                                .send(AppEvent::UpdateComplete {
-                                                    output,
-                                                    packages_before,
-                                                    packages_after,
-                                                })
-                                                .await;
+                                        let _ = tx_clone.blocking_send(AppEvent::UpdateComplete {
+                                            output,
+                                            packages_before,
+                                            packages_after,
                                         });
                                     }
                                     Err(e) => {
-                                        let rt = tokio::runtime::Builder::new_current_thread()
-                                            .enable_all()
-                                            .build()
-                                            .unwrap();
-                                        rt.block_on(async {
-                                            let _ = tx_clone
-                                                .send(AppEvent::Error(format!("更新失败: {}", e)))
-                                                .await;
-                                        });
+                                        let _ = tx_clone.blocking_send(
+                                            AppEvent::Error(format!("更新失败: {}", e))
+                                        );
                                     }
                                 }
                             });
@@ -302,6 +327,9 @@ pub async fn run(api_key: String, config: Config, test_mode: bool) -> Result<()>
                 AppEvent::PackageManagerDetected(pm) => {
                     app.package_manager = Some(pm);
                     app.state = AppState::PreUpdate;
+                }
+                AppEvent::SystemInfoDetected(info) => {
+                    app.system_info = Some(info);
                 }
                 AppEvent::UpdateLine(line) => {
                     // 实时添加输出行
@@ -326,11 +354,12 @@ pub async fn run(api_key: String, config: Config, test_mode: bool) -> Result<()>
                         let update_log = output.combined_output();
                         let pkg_before = packages_before.as_deref();
                         let pkg_after = packages_after.as_deref();
+                        let sys_info = app.system_info.clone();
 
                         let prompt_text =
-                            prompt::generate_analysis_prompt(&pm_name, &update_log, pkg_before, pkg_after);
+                            prompt::generate_analysis_prompt(&pm_name, &update_log, pkg_before, pkg_after, sys_info.as_ref());
 
-                        let client = DeepSeekClient::new(api_key.clone());
+                        let client = AiClient::new(api_key.clone(), config.get_api_url().to_string(), config.proxy.as_deref());
                         let model = config.model.clone();
                         let temperature = config.temperature;
                         let tx_clone = tx.clone();
@@ -402,7 +431,8 @@ pub async fn run(api_key: String, config: Config, test_mode: bool) -> Result<()>
 #[derive(Debug)]
 enum AppEvent {
     PackageManagerDetected(PackageManager),
-    UpdateLine(String),  // 新增：实时输出行
+    SystemInfoDetected(SystemInfo),
+    UpdateLine(String),
     UpdateComplete {
         output: UpdateOutput,
         packages_before: Option<String>,
@@ -511,15 +541,24 @@ fn render_content(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_footer(f: &mut Frame, app: &App, area: Rect) {
+    let owned_text: String;
     let footer_text = match app.state {
         AppState::PackageManagerCheck => "请稍候...",
         AppState::PreUpdate => "按 Enter 开始更新 | q 退出",
-        AppState::Updating => "更新进行中,请稍候...",
+        AppState::Updating => {
+            if app.update_progress.is_empty() {
+                "更新进行中..."
+            } else {
+                owned_text = format!("更新进行中 | {}", app.update_progress);
+                &owned_text
+            }
+        }
         AppState::UpdateComplete => "更新完成,等待 AI 分析...",
         AppState::Analyzing => "AI 正在分析更新内容...",
         AppState::AnalysisComplete => {
             if let Some(path) = &app.saved_report_path {
-                &format!("报告已保存: {} | Tab 切换视图 | ↑↓ 滚动 | q 退出", path)
+                owned_text = format!("报告已保存: {} | Tab 切换视图 | ↑↓ 滚动 | q 退出", path);
+                &owned_text
             } else {
                 "Tab 切换视图 | ↑↓ 滚动 | q 退出"
             }

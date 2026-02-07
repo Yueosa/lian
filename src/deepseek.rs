@@ -2,8 +2,6 @@ use anyhow::Result;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
-const DEEPSEEK_API_URL: &str = "https://api.deepseek.com/chat/completions";
-
 #[derive(Debug, Serialize)]
 struct ChatRequest {
     model: String,
@@ -27,8 +25,6 @@ struct ChatResponse {
 #[derive(Debug, Deserialize)]
 struct Choice {
     message: Message,
-    #[allow(dead_code)]
-    finish_reason: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -38,16 +34,29 @@ struct Usage {
     total_tokens: u32,
 }
 
-pub struct DeepSeekClient {
+pub struct AiClient {
     client: Client,
     api_key: String,
+    api_url: String,
 }
 
-impl DeepSeekClient {
-    pub fn new(api_key: String) -> Self {
+impl AiClient {
+    pub fn new(api_key: String, api_url: String, proxy: Option<&str>) -> Self {
+        let client = if let Some(proxy_url) = proxy {
+            match reqwest::Proxy::all(proxy_url) {
+                Ok(p) => Client::builder().proxy(p).build().unwrap_or_else(|_| Client::new()),
+                Err(e) => {
+                    log::warn!("代理配置无效 ({}): {}", proxy_url, e);
+                    Client::new()
+                }
+            }
+        } else {
+            Client::new()
+        };
         Self {
-            client: Client::new(),
+            client,
             api_key,
+            api_url,
         }
     }
 
@@ -69,7 +78,7 @@ impl DeepSeekClient {
 
         let response = self
             .client
-            .post(DEEPSEEK_API_URL)
+            .post(&self.api_url)
             .header("Content-Type", "application/json")
             .header("Authorization", format!("Bearer {}", self.api_key))
             .json(&request)
@@ -79,17 +88,12 @@ impl DeepSeekClient {
         if !response.status().is_success() {
             let status = response.status();
             let error_text = response.text().await?;
-            return Err(anyhow::anyhow!(
-                "DeepSeek API 请求失败 (状态码 {}): {}",
-                status,
-                error_text
-            ));
+            anyhow::bail!("API 请求失败 ({}): {}", status, error_text);
         }
 
         let chat_response: ChatResponse = response.json().await?;
 
         if let Some(choice) = chat_response.choices.first() {
-            // 记录 token 使用情况
             if let Some(usage) = chat_response.usage {
                 log::info!(
                     "Token 使用: 输入={}, 输出={}, 总计={}",
@@ -101,7 +105,7 @@ impl DeepSeekClient {
 
             Ok(choice.message.content.clone())
         } else {
-            Err(anyhow::anyhow!("DeepSeek API 返回了空响应"))
+            anyhow::bail!("API 返回了空响应")
         }
     }
 }
