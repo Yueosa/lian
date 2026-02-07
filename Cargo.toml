@@ -35,6 +35,9 @@ toml = "0.8"
 # 系统调用
 libc = "0.2"
 
+# Unicode 字符宽度
+unicode-width = "0.2"
+
 [profile.release]
 opt-level = "z"
 lto = true
