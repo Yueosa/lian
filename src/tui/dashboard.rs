@@ -7,9 +7,10 @@ use ratatui::{
     Frame,
 };
 
-const ASCII_LOGO: &str = r#"██       ██
-░██      ░░
-░██       ██  ██████  ███████
+const ASCII_LOGO: &str = r#"
+██       ██                   
+░██      ░░                   
+░██       ██  ██████  ███████ 
 ░██      ░██ ░░░░░░██░░██░░░██
 ░██      ░██  ███████ ░██  ░██
 ░██      ░██ ██░░░░██ ░██  ░██
@@ -50,24 +51,24 @@ pub fn render_dashboard(f: &mut Frame, app: &App) {
 
     // 系统信息内容
     if let Some(info) = &app.system_info {
-        lines.push(info_line("发行版", &info.distro));
-        lines.push(info_line("内  核", &info.kernel));
+        lines.push(info_line("发行版  ", &info.distro));
+        lines.push(info_line("内核  ", &info.kernel));
     } else {
-        lines.push(info_line("发行版", "检测中..."));
-        lines.push(info_line("内  核", "检测中..."));
+        lines.push(info_line("发行版  ", "检测中..."));
+        lines.push(info_line("内核  ", "检测中..."));
     }
 
     if let Some(pm) = &app.package_manager {
-        lines.push(info_line("包管理器", pm.name()));
+        lines.push(info_line("包管理器  ", pm.name()));
     } else {
-        lines.push(info_line("包管理器", "检测中..."));
+        lines.push(info_line("包管理器  ", "检测中..."));
     }
 
     if let Some(count) = app.installed_count {
         let count_str = format!("{count} 个");
-        lines.push(info_line_owned("已安装包", &count_str));
+        lines.push(info_line_owned("已安装包  ", &count_str));
     } else {
-        lines.push(info_line_owned("已安装包", "统计中..."));
+        lines.push(info_line_owned("已安装包  ", "统计中..."));
     }
 
     lines.push(Line::from(""));
@@ -81,19 +82,19 @@ pub fn render_dashboard(f: &mut Frame, app: &App) {
     lines.push(Line::from(""));
 
     // 快捷键列表
-    lines.push(shortcut_line("U", " 系统更新 (Syu)"));
-    lines.push(shortcut_line("S", " 安装软件包"));
-    lines.push(shortcut_line("R", " 卸载软件包"));
-    lines.push(shortcut_line("Q", " 查询软件包"));
-    lines.push(shortcut_line("C", " 设置"));
-    lines.push(shortcut_line("q", " 退出"));
+    lines.push(shortcut_line("U", " 系统更新 (Syu)  "));
+    lines.push(shortcut_line("S", " 安装软件包       "));
+    lines.push(shortcut_line("R", " 卸载软件包       "));
+    lines.push(shortcut_line("Q", " 查询软件包       "));
+    lines.push(shortcut_line("C", " 设置             "));
+    lines.push(shortcut_line("q", " 退出             "));
 
     lines.push(Line::from(""));
     lines.push(Line::from(""));
 
     // 版本号
     lines.push(Line::from(vec![Span::styled(
-        format!("lian v{}", env!("CARGO_PKG_VERSION")),
+        format!("lian v{}  ", env!("CARGO_PKG_VERSION")),
         Style::default().fg(Color::DarkGray),
     )]));
 
