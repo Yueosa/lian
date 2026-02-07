@@ -218,6 +218,22 @@ pub async fn run(api_key: String, config: Config) -> Result<()> {
                     app.error_message = Some(msg);
                     app.state = AppState::Error;
                 }
+                AppEvent::QueryLocalResults(results) => {
+                    app.query_local_results = results;
+                    app.query_local_selected = 0;
+                    app.query_searching = false;
+                }
+                AppEvent::QueryRemoteResults(results) => {
+                    app.query_remote_results = results;
+                    app.query_remote_selected = 0;
+                    app.query_searching = false;
+                }
+                AppEvent::QueryDetailLoaded { detail, files } => {
+                    app.query_detail = Some(detail);
+                    app.query_files = files;
+                    app.query_detail_scroll = 0;
+                    app.query_view = state::QueryView::Detail;
+                }
             }
         }
 
