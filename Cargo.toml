@@ -32,9 +32,6 @@ env_logger = "0.11"
 # 配置文件
 toml = "0.8"
 
-# 命令行参数
-clap = { version = "4", features = ["derive"] }
-
 # 系统调用
 libc = "0.2"
 
