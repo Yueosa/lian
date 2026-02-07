@@ -511,6 +511,10 @@ fn render_result_list(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         0
     };
 
+    // MTF flag colors
+    let pink = Color::Rgb(245, 169, 184);
+    let blue = Color::Rgb(91, 206, 250);
+
     let lines: Vec<Line> = app.install_results
         .iter()
         .enumerate()
@@ -524,22 +528,38 @@ fn render_result_list(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             let cursor = if is_selected { ">" } else { " " };
             let installed_tag = if pkg.installed { " [已安装]" } else { "" };
 
-            let text = format!(
-                "{}{}{}/{} {}{} - {}",
-                cursor, marker, pkg.repo, pkg.name, pkg.version, installed_tag, pkg.description
-            );
-
-            let style = if is_selected {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            if is_selected {
+                // 选中行：全粉色加粗
+                let text = format!(
+                    "{}{}{}/{} {}{} - {}",
+                    cursor, marker, pkg.repo, pkg.name, pkg.version, installed_tag, pkg.description
+                );
+                Line::from(Span::styled(text, Style::default().fg(pink).add_modifier(Modifier::BOLD)))
             } else if is_marked {
-                Style::default().fg(Color::Green)
+                // 标记行：粉色
+                let text = format!(
+                    "{}{}{}/{} {}{} - {}",
+                    cursor, marker, pkg.repo, pkg.name, pkg.version, installed_tag, pkg.description
+                );
+                Line::from(Span::styled(text, Style::default().fg(pink)))
             } else if pkg.installed {
-                Style::default().fg(Color::DarkGray)
+                // 已安装：暗灰
+                let text = format!(
+                    "{}{}{}/{} {}{} - {}",
+                    cursor, marker, pkg.repo, pkg.name, pkg.version, installed_tag, pkg.description
+                );
+                Line::from(Span::styled(text, Style::default().fg(Color::DarkGray)))
             } else {
-                Style::default().fg(Color::White)
-            };
-
-            Line::from(Span::styled(text, style))
+                // 正常行：分色显示 — 名称蓝色，版本白色，描述灰色
+                Line::from(vec![
+                    Span::styled(format!("{}{}", cursor, marker), Style::default().fg(Color::White)),
+                    Span::styled(format!("{}/", pkg.repo), Style::default().fg(Color::DarkGray)),
+                    Span::styled(pkg.name.clone(), Style::default().fg(blue)),
+                    Span::styled(format!(" {}", pkg.version), Style::default().fg(Color::White)),
+                    Span::styled(installed_tag.to_string(), Style::default().fg(Color::DarkGray)),
+                    Span::styled(format!(" - {}", pkg.description), Style::default().fg(Color::DarkGray)),
+                ])
+            }
         })
         .collect();
 

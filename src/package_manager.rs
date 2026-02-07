@@ -64,11 +64,7 @@ impl PackageManager {
         Command::new("pacman")
             .args(["-Q"])
             .output()
-            .map(|o| {
-                String::from_utf8_lossy(&o.stdout)
-                    .lines()
-                    .count()
-            })
+            .map(|o| String::from_utf8_lossy(&o.stdout).lines().count())
             .unwrap_or(0)
     }
 
@@ -91,21 +87,17 @@ impl PackageManager {
             Command::new(&self.command).args(["-Qu"]).output()
         };
         match output {
-            Ok(o) if o.status.success() => {
-                String::from_utf8_lossy(&o.stdout)
-                    .lines()
-                    .map(|s| s.to_string())
-                    .collect()
-            }
+            Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout)
+                .lines()
+                .map(|s| s.to_string())
+                .collect(),
             _ => Vec::new(),
         }
     }
 
     /// 获取当前已安装的显式安装包列表
     pub fn get_explicit_packages(&self) -> Result<String> {
-        let output = Command::new("pacman")
-            .args(["-Qe"])
-            .output()?;
+        let output = Command::new("pacman").args(["-Qe"]).output()?;
         if !output.status.success() {
             anyhow::bail!("pacman -Qe 执行失败");
         }
@@ -113,11 +105,14 @@ impl PackageManager {
     }
 
     /// 执行系统更新命令（流式输出）
-    pub fn update_streaming(&self, output_tx: mpsc::UnboundedSender<String>) -> Result<UpdateOutput> {
-        reset_cancel();  // 重置取消标志
-        
+    pub fn update_streaming(
+        &self,
+        output_tx: mpsc::UnboundedSender<String>,
+    ) -> Result<UpdateOutput> {
+        reset_cancel(); // 重置取消标志
+
         use std::os::unix::process::CommandExt;
-        
+
         let mut child = if self.command == "pacman" {
             let mut cmd = Command::new("sudo");
             cmd.args(["pacman", "-Syu", "--noconfirm"]);
@@ -158,12 +153,12 @@ impl PackageManager {
             if let Some(mut stdout) = stdout {
                 let mut buffer = [0u8; 1024];
                 let mut line_buffer = String::new();
-                
+
                 while let Ok(n) = stdout.read(&mut buffer) {
                     if n == 0 || should_cancel() {
                         break;
                     }
-                    
+
                     let chunk = String::from_utf8_lossy(&buffer[..n]);
                     for c in chunk.chars() {
                         match c {
@@ -209,12 +204,12 @@ impl PackageManager {
             if let Some(mut stderr) = stderr {
                 let mut buffer = [0u8; 1024];
                 let mut line_buffer = String::new();
-                
+
                 while let Ok(n) = stderr.read(&mut buffer) {
                     if n == 0 || should_cancel() {
                         break;
                     }
-                    
+
                     let chunk = String::from_utf8_lossy(&buffer[..n]);
                     for c in chunk.chars() {
                         match c {
@@ -248,7 +243,7 @@ impl PackageManager {
         // 等待两个线程完成
         let all_stdout = stdout_handle.join().unwrap_or_default();
         let all_stderr = stderr_handle.join().unwrap_or_default();
-        
+
         let cancelled = should_cancel();
 
         // 如果被取消，尝试终止子进程
@@ -264,7 +259,7 @@ impl PackageManager {
         }
 
         let status = child.wait()?;
-        CHILD_PID.store(0, Ordering::SeqCst);  // 清除 PID
+        CHILD_PID.store(0, Ordering::SeqCst); // 清除 PID
 
         Ok(UpdateOutput {
             stdout: all_stdout,
@@ -278,7 +273,11 @@ impl PackageManager {
 
 impl PackageManager {
     /// 执行安装命令（流式输出）
-    pub fn install_streaming(&self, packages: &[String], output_tx: mpsc::UnboundedSender<String>) -> Result<UpdateOutput> {
+    pub fn install_streaming(
+        &self,
+        packages: &[String],
+        output_tx: mpsc::UnboundedSender<String>,
+    ) -> Result<UpdateOutput> {
         reset_cancel();
 
         use std::os::unix::process::CommandExt;
@@ -320,13 +319,10 @@ impl PackageManager {
         let stderr = child.stderr.take();
 
         let output_tx_clone = output_tx.clone();
-        let stdout_handle = std::thread::spawn(move || {
-            read_stream_lines(stdout, &output_tx_clone, false)
-        });
+        let stdout_handle =
+            std::thread::spawn(move || read_stream_lines(stdout, &output_tx_clone, false));
 
-        let stderr_handle = std::thread::spawn(move || {
-            read_stream_lines(stderr, &output_tx, true)
-        });
+        let stderr_handle = std::thread::spawn(move || read_stream_lines(stderr, &output_tx, true));
 
         let all_stdout = stdout_handle.join().unwrap_or_default();
         let all_stderr = stderr_handle.join().unwrap_or_default();
@@ -354,7 +350,11 @@ impl PackageManager {
     }
 
     /// 执行卸载命令（流式输出）
-    pub fn remove_streaming(&self, packages: &[String], output_tx: mpsc::UnboundedSender<String>) -> Result<UpdateOutput> {
+    pub fn remove_streaming(
+        &self,
+        packages: &[String],
+        output_tx: mpsc::UnboundedSender<String>,
+    ) -> Result<UpdateOutput> {
         reset_cancel();
 
         use std::os::unix::process::CommandExt;
@@ -396,13 +396,10 @@ impl PackageManager {
         let stderr = child.stderr.take();
 
         let output_tx_clone = output_tx.clone();
-        let stdout_handle = std::thread::spawn(move || {
-            read_stream_lines(stdout, &output_tx_clone, false)
-        });
+        let stdout_handle =
+            std::thread::spawn(move || read_stream_lines(stdout, &output_tx_clone, false));
 
-        let stderr_handle = std::thread::spawn(move || {
-            read_stream_lines(stderr, &output_tx, true)
-        });
+        let stderr_handle = std::thread::spawn(move || read_stream_lines(stderr, &output_tx, true));
 
         let all_stdout = stdout_handle.join().unwrap_or_default();
         let all_stderr = stderr_handle.join().unwrap_or_default();
@@ -432,9 +429,7 @@ impl PackageManager {
     /// 获取显式安装的包列表（含大小和描述）
     pub fn get_installed_packages_with_size(&self) -> Vec<InstalledPackage> {
         // 使用 pacman -Qe 获取显式安装的包，再用 pacman -Qi 获取详情
-        let output = Command::new("pacman")
-            .args(["-Qei"])
-            .output();
+        let output = Command::new("pacman").args(["-Qei"]).output();
 
         match output {
             Ok(o) if o.status.success() => {
@@ -450,9 +445,7 @@ impl PackageManager {
         let mut lines = Vec::new();
 
         for pkg in packages {
-            let output = Command::new("pacman")
-                .args(["-Si", pkg])
-                .output();
+            let output = Command::new("pacman").args(["-Si", pkg]).output();
 
             if let Ok(o) = output {
                 if o.status.success() {
@@ -467,9 +460,10 @@ impl PackageManager {
                             let key = line[..colon].trim();
                             let val = line[colon + 1..].trim();
                             match key {
-                                "Name" | "名称" => name = val.to_string(),
+                                "Name" | "名称" | "名字" => name = val.to_string(),
                                 "Version" | "版本" => version = val.to_string(),
-                                "Installed Size" | "Download Size" | "安装大小" | "下载大小" => {
+                                "Installed Size" | "Download Size" | "安装大小" | "安装后大小"
+                                | "下载大小" => {
                                     if size.is_empty() {
                                         size = val.to_string();
                                     }
@@ -503,17 +497,13 @@ impl PackageManager {
         let mut args = vec!["-Rns".to_string(), "--print".to_string()];
         args.extend(packages.iter().cloned());
 
-        let output = Command::new("pacman")
-            .args(&args)
-            .output();
+        let output = Command::new("pacman").args(&args).output();
 
         match output {
-            Ok(o) if o.status.success() => {
-                String::from_utf8_lossy(&o.stdout)
-                    .lines()
-                    .map(|s| format!("  {}", s))
-                    .collect()
-            }
+            Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout)
+                .lines()
+                .map(|s| format!("  {}", s))
+                .collect(),
             Ok(o) => {
                 // pacman --print 在 stderr 输出警告/错误
                 let stderr = String::from_utf8_lossy(&o.stderr);
@@ -569,9 +559,9 @@ fn parse_installed_packages(output: &str) -> Vec<InstalledPackage> {
             let key = line[..colon].trim();
             let val = line[colon + 1..].trim();
             match key {
-                "Name" | "名称" => name = val.to_string(),
+                "Name" | "名称" | "名字" => name = val.to_string(),
                 "Version" | "版本" => version = val.to_string(),
-                "Installed Size" | "安装大小" => size = val.to_string(),
+                "Installed Size" | "安装大小" | "安装后大小" => size = val.to_string(),
                 "Description" | "描述" => description = val.to_string(),
                 _ => {}
             }
@@ -671,7 +661,7 @@ fn clean_terminal_output(input: &str) -> String {
                 // 跳过转义序列
                 if chars.peek() == Some(&'[') {
                     chars.next(); // 消费 '['
-                    // 跳过直到遇到字母
+                                  // 跳过直到遇到字母
                     while let Some(&next) = chars.peek() {
                         chars.next();
                         if next.is_ascii_alphabetic() {
@@ -749,9 +739,7 @@ impl PackageManager {
         if keyword.trim().is_empty() {
             return Vec::new();
         }
-        let output = Command::new("pacman")
-            .args(["-Qs", keyword])
-            .output();
+        let output = Command::new("pacman").args(["-Qs", keyword]).output();
         match output {
             Ok(o) if o.status.success() => {
                 parse_search_output(&String::from_utf8_lossy(&o.stdout), true)
@@ -765,9 +753,7 @@ impl PackageManager {
         if keyword.trim().is_empty() {
             return Vec::new();
         }
-        let output = Command::new(&self.command)
-            .args(["-Ss", keyword])
-            .output();
+        let output = Command::new(&self.command).args(["-Ss", keyword]).output();
         match output {
             Ok(o) if o.status.success() => {
                 parse_search_output(&String::from_utf8_lossy(&o.stdout), false)
@@ -778,9 +764,7 @@ impl PackageManager {
 
     /// 获取本地包详情 (pacman -Qi)
     pub fn package_info_local(&self, name: &str) -> Result<PackageDetail> {
-        let output = Command::new("pacman")
-            .args(["-Qi", name])
-            .output()?;
+        let output = Command::new("pacman").args(["-Qi", name]).output()?;
         if !output.status.success() {
             anyhow::bail!("pacman -Qi {} 执行失败", name);
         }
@@ -790,9 +774,7 @@ impl PackageManager {
 
     /// 获取远程包详情 (pacman -Si)
     pub fn package_info_remote(&self, name: &str) -> Result<PackageDetail> {
-        let output = Command::new("pacman")
-            .args(["-Si", name])
-            .output()?;
+        let output = Command::new("pacman").args(["-Si", name]).output()?;
         if !output.status.success() {
             anyhow::bail!("pacman -Si {} 执行失败", name);
         }
@@ -802,9 +784,7 @@ impl PackageManager {
 
     /// 获取已安装包的文件列表 (pacman -Ql)
     pub fn package_files(&self, name: &str) -> Vec<String> {
-        let output = Command::new("pacman")
-            .args(["-Ql", name])
-            .output();
+        let output = Command::new("pacman").args(["-Ql", name]).output();
         match output {
             Ok(o) if o.status.success() => {
                 String::from_utf8_lossy(&o.stdout)
@@ -831,27 +811,23 @@ impl PackageManager {
 
     /// 获取已安装包的目录列表（最底层目录） (pacman -Ql)
     pub fn package_dirs(&self, name: &str) -> Vec<String> {
-        let output = Command::new("pacman")
-            .args(["-Ql", name])
-            .output();
+        let output = Command::new("pacman").args(["-Ql", name]).output();
         match output {
-            Ok(o) if o.status.success() => {
-                String::from_utf8_lossy(&o.stdout)
-                    .lines()
-                    .filter_map(|line| {
-                        if let Some(pos) = line.find(' ') {
-                            let path = &line[pos + 1..];
-                            if path.ends_with('/') {
-                                Some(path.to_string())
-                            } else {
-                                None
-                            }
+            Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout)
+                .lines()
+                .filter_map(|line| {
+                    if let Some(pos) = line.find(' ') {
+                        let path = &line[pos + 1..];
+                        if path.ends_with('/') {
+                            Some(path.to_string())
                         } else {
                             None
                         }
-                    })
-                    .collect()
-            }
+                    } else {
+                        None
+                    }
+                })
+                .collect(),
             _ => Vec::new(),
         }
     }
@@ -881,9 +857,8 @@ fn parse_search_output(output: &str, is_local: bool) -> Vec<PackageInfo> {
 
                 if let Some(&name) = parts.first() {
                     let version = parts.get(1).unwrap_or(&"").to_string();
-                    let installed = is_local
-                        || rest.contains("[installed")
-                        || rest.contains("[已安装");
+                    let installed =
+                        is_local || rest.contains("[installed") || rest.contains("[已安装");
 
                     // 下一行是描述
                     let description = if i + 1 < lines.len() {

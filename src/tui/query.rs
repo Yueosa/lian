@@ -440,6 +440,10 @@ fn render_result_panel(
         0
     };
 
+    // MTF flag colors
+    let pink = Color::Rgb(245, 169, 184);
+    let blue = Color::Rgb(91, 206, 250);
+
     let mut lines: Vec<Line> = Vec::new();
     for (i, pkg) in results.iter().enumerate().skip(scroll).take(visible_items) {
         let is_selected = i == selected && focused;
@@ -447,18 +451,24 @@ fn render_result_panel(
         let installed_mark = if pkg.installed { " [已安装]" } else { "" };
 
         // 第一行：包名 + 版本
-        let name_line = format!(
-            "{}{}/{} {}{}",
-            marker, pkg.repo, pkg.name, pkg.version, installed_mark
-        );
-        let name_style = if is_selected {
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD)
+        if is_selected {
+            let name_line = format!(
+                "{}{}/{} {}{}",
+                marker, pkg.repo, pkg.name, pkg.version, installed_mark
+            );
+            lines.push(Line::from(Span::styled(
+                name_line,
+                Style::default().fg(pink).add_modifier(Modifier::BOLD),
+            )));
         } else {
-            Style::default().fg(Color::White)
-        };
-        lines.push(Line::from(Span::styled(name_line, name_style)));
+            lines.push(Line::from(vec![
+                Span::styled(marker.to_string(), Style::default().fg(Color::White)),
+                Span::styled(format!("{}/", pkg.repo), Style::default().fg(Color::DarkGray)),
+                Span::styled(pkg.name.clone(), Style::default().fg(blue)),
+                Span::styled(format!(" {}", pkg.version), Style::default().fg(Color::White)),
+                Span::styled(installed_mark.to_string(), Style::default().fg(Color::DarkGray)),
+            ]));
+        }
 
         // 第二行：描述（缩进） 
         let desc = if pkg.description.is_empty() {
@@ -467,7 +477,7 @@ fn render_result_panel(
             pkg.description.clone()
         };
         let desc_style = if is_selected {
-            Style::default().fg(Color::Yellow)
+            Style::default().fg(pink)
         } else {
             Style::default().fg(Color::DarkGray)
         };

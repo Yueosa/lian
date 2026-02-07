@@ -534,28 +534,37 @@ fn render_package_list(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             let marker = if is_marked { "[✓] " } else { "    " };
             let cursor = if is_selected { ">" } else { " " };
 
-            let name_ver = format!("{} {}", pkg.name, pkg.version);
-            let name_width = UnicodeWidthStr::width(name_ver.as_str());
-            let padding = max_name_width.saturating_sub(name_width) + 2;
+            let name_width = UnicodeWidthStr::width(pkg.name.as_str());
+            let ver_width = UnicodeWidthStr::width(pkg.version.as_str());
+            let name_ver_width = name_width + 1 + ver_width; // +1 for space
+            let padding = max_name_width.saturating_sub(name_ver_width) + 2;
 
-            let text = format!(
-                "{}{}{}{}{}",
-                cursor,
-                marker,
-                name_ver,
-                " ".repeat(padding),
-                pkg.size
-            );
+            // MTF flag colors
+            let pink = Color::Rgb(245, 169, 184);
+            let blue = Color::Rgb(91, 206, 250);
 
-            let style = if is_selected {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            if is_selected {
+                let text = format!(
+                    "{}{}{} {}{}{}",
+                    cursor, marker, pkg.name, pkg.version,
+                    " ".repeat(padding), pkg.size
+                );
+                Line::from(Span::styled(text, Style::default().fg(pink).add_modifier(Modifier::BOLD)))
             } else if is_marked {
-                Style::default().fg(Color::Red)
+                let text = format!(
+                    "{}{}{} {}{}{}",
+                    cursor, marker, pkg.name, pkg.version,
+                    " ".repeat(padding), pkg.size
+                );
+                Line::from(Span::styled(text, Style::default().fg(pink)))
             } else {
-                Style::default().fg(Color::White)
-            };
-
-            Line::from(Span::styled(text, style))
+                Line::from(vec![
+                    Span::styled(format!("{}{}", cursor, marker), Style::default().fg(Color::White)),
+                    Span::styled(pkg.name.clone(), Style::default().fg(blue)),
+                    Span::styled(format!(" {}", pkg.version), Style::default().fg(Color::White)),
+                    Span::styled(format!("{}{}", " ".repeat(padding), pkg.size), Style::default().fg(Color::DarkGray)),
+                ])
+            }
         })
         .collect();
 
