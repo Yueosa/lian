@@ -396,12 +396,18 @@ impl PackageManager {
             Ok(o) if o.status.success() => {
                 String::from_utf8_lossy(&o.stdout)
                     .lines()
-                    .map(|line| {
+                    .filter_map(|line| {
                         // 格式: "pkgname /path/to/file"
                         if let Some(pos) = line.find(' ') {
-                            line[pos + 1..].to_string()
+                            let path = &line[pos + 1..];
+                            // 过滤掉目录条目（以 / 结尾）
+                            if path.ends_with('/') {
+                                None
+                            } else {
+                                Some(path.to_string())
+                            }
                         } else {
-                            line.to_string()
+                            None
                         }
                     })
                     .collect()

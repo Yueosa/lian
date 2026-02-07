@@ -29,11 +29,11 @@ pub fn handle_update_key(
             }
             true
         }
-        KeyCode::Up | KeyCode::Char('k') => {
+        KeyCode::Up => {
             app.scroll_up();
             true
         }
-        KeyCode::Down | KeyCode::Char('j') => {
+        KeyCode::Down => {
             let content = app.get_current_content();
             let visible = layout::visible_content_height(term_height);
             app.scroll_down(content.len(), visible);
@@ -53,8 +53,89 @@ pub fn handle_update_key(
     }
 }
 
-/// 启动更新异步任务
-pub fn spawn_update_task(app: &mut App, tx: &mpsc::Sender<AppEvent>) {
+/// 生成更新前后的包变更摘要
+pub fn generate_update_diff(before: Option<&str>, after: Option<&str>) -> String {
+    use std::collections::HashMap;
+
+    fn parse_pkgs(text: &str) -> HashMap<String, String> {
+        let mut map = HashMap::new();
+        for line in text.lines() {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 2 {
+                map.insert(parts[0].to_string(), parts[1].to_string());
+            }
+        }
+        map
+    }
+
+    let before_pkgs = parse_pkgs(before.unwrap_or(""));
+    let after_pkgs = parse_pkgs(after.unwrap_or(""));
+
+    let mut updated = Vec::new();
+    let mut added = Vec::new();
+    let mut removed = Vec::new();
+
+    for (name, new_ver) in &after_pkgs {
+        match before_pkgs.get(name) {
+            Some(old_ver) if old_ver != new_ver => {
+                updated.push((name.clone(), old_ver.clone(), new_ver.clone()));
+            }
+            None => {
+                added.push((name.clone(), new_ver.clone()));
+            }
+            _ => {}
+        }
+    }
+    for (name, old_ver) in &before_pkgs {
+        if !after_pkgs.contains_key(name) {
+            removed.push((name.clone(), old_ver.clone()));
+        }
+    }
+
+    updated.sort_by(|a, b| a.0.cmp(&b.0));
+    added.sort_by(|a, b| a.0.cmp(&b.0));
+    removed.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let mut lines = Vec::new();
+    lines.push("[=== 更新概览 ===".to_string());
+    lines.push(format!(
+        "更新包: {} 个  |  新增: {} 个  |  移除: {} 个",
+        updated.len(),
+        added.len(),
+        removed.len()
+    ));
+    lines.push(String::new());
+
+    if !updated.is_empty() {
+        lines.push("[=== 版本变更 ===".to_string());
+        for (name, old_ver, new_ver) in &updated {
+            lines.push(format!("  {}  {} → {}", name, old_ver, new_ver));
+        }
+        lines.push(String::new());
+    }
+    if !added.is_empty() {
+        lines.push("[=== 新增包 ===".to_string());
+        for (name, ver) in &added {
+            lines.push(format!("  {} {}", name, ver));
+        }
+        lines.push(String::new());
+    }
+    if !removed.is_empty() {
+        lines.push("[=== 移除包 ===".to_string());
+        for (name, ver) in &removed {
+            lines.push(format!("  {} {}", name, ver));
+        }
+    }
+    if updated.is_empty() && added.is_empty() && removed.is_empty() {
+        lines.push("系统已是最新，没有包被更新。".to_string());
+    }
+
+    lines.join("\n")
+}
+
+/// 启动更新异步任务（保留用于可能的后台更新模式）
+#[allow(dead_code)]
+fn spawn_update_task(app: &mut App, tx: &mpsc::Sender<AppEvent>) {
     let pm = match app.package_manager.clone() {
         Some(pm) => pm,
         None => return,
@@ -142,8 +223,15 @@ pub fn handle_update_complete(
                 }
             });
         } else if output.success {
-            // AI 分析已关闭
-            app.add_update_line("AI 分析已关闭，可在设置中开启".to_string());
+            // AI 分析已关闭，在 stdout 中追加提示
+        }
+    }
+    // 如果 AI 未启用但更新成功，追加提示到输出
+    if let Some(ref output) = app.update_output {
+        if output.success && !config.ai_enabled_for("update") {
+            let mut new_output = output.clone();
+            new_output.stdout.push_str("\n\n[AI 分析已关闭，可在设置中开启]");
+            app.update_output = Some(new_output);
         }
     }
 }
