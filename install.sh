@@ -102,6 +102,12 @@ temperature = 0.8
 # 报告保存目录
 # 使用绝对路径,或使用 $HOME 变量
 report_dir = "$HOME/.lian/pacman/"
+
+# AI 分析开关
+[ai]
+update = true      # 系统更新后 AI 分析
+install = false    # 安装软件包后 AI 分析
+remove = false     # 卸载软件包后 AI 分析
 EOF
     
     # 替换 $HOME 为实际路径
