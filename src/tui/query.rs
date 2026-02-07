@@ -1,13 +1,13 @@
 use super::input::{self, InputBox};
 use super::layout;
-use super::state::{App, AppEvent, QueryPanel, QueryView};
+use super::state::{App, AppEvent, FileListMode, QueryPanel, QueryView};
 use crate::package_manager::PackageInfo;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Margin, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
+    widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap},
     Frame,
 };
 use tokio::sync::mpsc;
@@ -29,8 +29,12 @@ fn input_box_from_app(app: &App) -> InputBox {
 /// 计算详情视图总行数（用于滚动边界）
 pub fn detail_total_lines(app: &App) -> usize {
     let field_count = app.query_detail.as_ref().map(|d| d.fields.len()).unwrap_or(0);
-    let file_lines = if !app.query_files.is_empty() {
-        2 + app.query_files.len()
+    let list_items = match app.query_file_mode {
+        FileListMode::Files => &app.query_files,
+        FileListMode::Directories => &app.query_dirs,
+    };
+    let file_lines = if !list_items.is_empty() {
+        2 + list_items.len()
     } else if app.query_detail.is_some() {
         2
     } else {
@@ -248,9 +252,19 @@ fn load_package_detail(app: &App, pkg: &PackageInfo, tx: &mpsc::Sender<AppEvent>
         .await;
 
         let files = if is_installed {
-            let pm = pm.clone();
-            let name = name.clone();
-            tokio::task::spawn_blocking(move || pm.package_files(&name))
+            let pm_f = pm.clone();
+            let name_f = name.clone();
+            tokio::task::spawn_blocking(move || pm_f.package_files(&name_f))
+                .await
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+
+        let dirs = if is_installed {
+            let pm_d = pm.clone();
+            let name_d = name.clone();
+            tokio::task::spawn_blocking(move || pm_d.package_dirs(&name_d))
                 .await
                 .unwrap_or_default()
         } else {
@@ -260,7 +274,7 @@ fn load_package_detail(app: &App, pkg: &PackageInfo, tx: &mpsc::Sender<AppEvent>
         match detail_result {
             Ok(Ok(detail)) => {
                 let _ = tx_clone
-                    .send(AppEvent::QueryDetailLoaded { detail, files })
+                    .send(AppEvent::QueryDetailLoaded { detail, files, dirs })
                     .await;
             }
             Ok(Err(e)) => {
@@ -288,6 +302,16 @@ fn handle_detail_key(key: KeyEvent, app: &mut App, term_height: u16) {
             app.query_view = QueryView::List;
             app.query_detail = None;
             app.query_files.clear();
+            app.query_dirs.clear();
+            app.query_file_mode = FileListMode::Files;
+            app.query_detail_scroll = 0;
+        }
+        KeyCode::Tab => {
+            // 切换文件/目录视图
+            app.query_file_mode = match app.query_file_mode {
+                FileListMode::Files => FileListMode::Directories,
+                FileListMode::Directories => FileListMode::Files,
+            };
             app.query_detail_scroll = 0;
         }
         KeyCode::Up => {
@@ -450,7 +474,8 @@ fn render_result_panel(
         lines.push(Line::from(Span::styled(format!("    {}", desc), desc_style)));
     }
 
-    let paragraph = Paragraph::new(lines);
+    let paragraph = Paragraph::new(lines)
+        .wrap(Wrap { trim: false });
     f.render_widget(paragraph, padded);
 
     // 滚动条
@@ -494,7 +519,15 @@ fn render_detail_view(f: &mut Frame, app: &App) {
     render_detail_content(f, app, chunks[1]);
 
     // Footer
-    layout::render_footer(f, "↑↓ 滚动 | PgUp/PgDn 翻页 | Esc 返回列表", chunks[2]);
+    let footer_text = if app.query_files.is_empty() && app.query_dirs.is_empty() {
+        "↑↓ 滚动 | PgUp/PgDn 翻页 | Esc 返回列表"
+    } else {
+        match app.query_file_mode {
+            FileListMode::Files => "↑↓ 滚动 | PgUp/PgDn 翻页 | Tab 切换目录视图 | Esc 返回列表",
+            FileListMode::Directories => "↑↓ 滚动 | PgUp/PgDn 翻页 | Tab 切换文件视图 | Esc 返回列表",
+        }
+    };
+    layout::render_footer(f, footer_text, chunks[2]);
 }
 
 /// 渲染详情内容区域
@@ -532,25 +565,38 @@ fn render_detail_content(f: &mut Frame, app: &App, area: Rect) {
         }
     }
 
-    // 文件列表分隔
-    if !app.query_files.is_empty() {
+    // 文件/目录列表
+    let (list_items, list_title, empty_msg) = match app.query_file_mode {
+        FileListMode::Files => (
+            &app.query_files,
+            "──── 文件列表 ────",
+            "  (远程包，无文件列表)",
+        ),
+        FileListMode::Directories => (
+            &app.query_dirs,
+            "──── 目录列表 ────",
+            "  (远程包，无目录列表)",
+        ),
+    };
+
+    if !list_items.is_empty() {
         all_lines.push(Line::from(""));
         all_lines.push(Line::from(Span::styled(
-            "──── 文件列表 ────",
+            list_title,
             Style::default()
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
         )));
-        for file in &app.query_files {
+        for item in list_items {
             all_lines.push(Line::from(Span::styled(
-                format!("  {}", file),
+                format!("  {}", item),
                 Style::default().fg(Color::White),
             )));
         }
     } else if app.query_detail.is_some() {
         all_lines.push(Line::from(""));
         all_lines.push(Line::from(Span::styled(
-            "  (远程包，无文件列表)",
+            empty_msg,
             Style::default().fg(Color::DarkGray),
         )));
     }
@@ -566,7 +612,8 @@ fn render_detail_content(f: &mut Frame, app: &App, area: Rect) {
         .take(visible_height)
         .collect();
 
-    let paragraph = Paragraph::new(visible);
+    let paragraph = Paragraph::new(visible)
+        .wrap(Wrap { trim: false });
     f.render_widget(paragraph, padded);
 
     // 滚动条
