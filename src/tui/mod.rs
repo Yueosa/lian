@@ -6,6 +6,7 @@ mod query;
 mod remove;
 mod settings;
 pub mod state;
+mod theme;
 mod update;
 
 use crate::config::Config;

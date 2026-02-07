@@ -1,6 +1,7 @@
 use super::input::InputBox;
 use super::layout;
 use super::state::{App, AppEvent, AppMode, RemoveState, ViewMode};
+use super::theme::{BLUE, BRIGHT_WHITE, DESC_DIM, DIM, PINK, SEL_BG};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     layout::{Alignment, Margin},
@@ -553,37 +554,32 @@ fn render_package_list(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             let name_ver_width = name_width + 1 + ver_width; // +1 for space
             let padding = max_name_width.saturating_sub(name_ver_width) + 2;
 
-            // MTF flag colors
-            let pink = Color::Rgb(245, 169, 184);
-            let blue = Color::Rgb(91, 206, 250);
-            let sel_bg = Color::Rgb(45, 35, 55);
-            let bright_white = Color::Rgb(255, 255, 255);
-            let dim = Color::Rgb(130, 130, 140);
+            // MTF flag colors from theme
 
             if is_selected {
                 // 选中行：深色背景 + 多色加粗
-                let bg = Style::default().bg(sel_bg);
+                let bg = Style::default().bg(SEL_BG);
                 Line::from(vec![
-                    Span::styled(format!("{}{}", cursor, marker), bg.fg(bright_white).add_modifier(Modifier::BOLD)),
-                    Span::styled(pkg.name.clone(), bg.fg(bright_white).add_modifier(Modifier::BOLD)),
-                    Span::styled(format!(" {}", pkg.version), bg.fg(blue)),
-                    Span::styled(format!("{}{}", " ".repeat(padding), pkg.size), bg.fg(Color::Rgb(180, 180, 190))),
+                    Span::styled(format!("{}{}", cursor, marker), bg.fg(BRIGHT_WHITE).add_modifier(Modifier::BOLD)),
+                    Span::styled(pkg.name.clone(), bg.fg(BRIGHT_WHITE).add_modifier(Modifier::BOLD)),
+                    Span::styled(format!(" {}", pkg.version), bg.fg(BLUE)),
+                    Span::styled(format!("{}{}", " ".repeat(padding), pkg.size), bg.fg(DESC_DIM)),
                 ])
             } else if is_marked {
                 // 标记行：粉色标识
                 Line::from(vec![
-                    Span::styled(format!("{}{}", cursor, marker), Style::default().fg(pink)),
-                    Span::styled(pkg.name.clone(), Style::default().fg(pink)),
+                    Span::styled(format!("{}{}", cursor, marker), Style::default().fg(PINK)),
+                    Span::styled(pkg.name.clone(), Style::default().fg(PINK)),
                     Span::styled(format!(" {}", pkg.version), Style::default().fg(Color::White)),
-                    Span::styled(format!("{}{}", " ".repeat(padding), pkg.size), Style::default().fg(dim)),
+                    Span::styled(format!("{}{}", " ".repeat(padding), pkg.size), Style::default().fg(DIM)),
                 ])
             } else {
                 // 正常行：名称蓝色，版本白色，大小灰色
                 Line::from(vec![
                     Span::styled(format!("{}{}", cursor, marker), Style::default().fg(Color::White)),
-                    Span::styled(pkg.name.clone(), Style::default().fg(blue)),
+                    Span::styled(pkg.name.clone(), Style::default().fg(BLUE)),
                     Span::styled(format!(" {}", pkg.version), Style::default().fg(Color::White)),
-                    Span::styled(format!("{}{}", " ".repeat(padding), pkg.size), Style::default().fg(dim)),
+                    Span::styled(format!("{}{}", " ".repeat(padding), pkg.size), Style::default().fg(DIM)),
                 ])
             }
         })

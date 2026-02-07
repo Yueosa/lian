@@ -1,5 +1,6 @@
 use super::layout;
 use super::state::{App, AppMode, SettingsItem};
+use super::theme::{BLUE, BRIGHT_WHITE, DIM, PINK, SEL_BG};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::{Margin, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -7,13 +8,6 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState};
 use ratatui::Frame;
 use unicode_width::UnicodeWidthStr;
-
-// MTF flag colors
-const PINK: Color = Color::Rgb(245, 169, 184);
-const BLUE: Color = Color::Rgb(91, 206, 250);
-const SEL_BG: Color = Color::Rgb(45, 35, 55);
-const BRIGHT_WHITE: Color = Color::Rgb(255, 255, 255);
-const DIM: Color = Color::Rgb(130, 130, 140);
 
 /// 处理设置模式按键
 pub fn handle_settings_key(key: KeyEvent, app: &mut App) -> bool {
