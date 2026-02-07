@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Result};
+use std::io::Read;
 use std::process::Command;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -158,7 +159,6 @@ impl PackageManager {
                 let mut buffer = [0u8; 1024];
                 let mut line_buffer = String::new();
                 
-                use std::io::Read;
                 while let Ok(n) = stdout.read(&mut buffer) {
                     if n == 0 || should_cancel() {
                         break;
@@ -210,7 +210,6 @@ impl PackageManager {
                 let mut buffer = [0u8; 1024];
                 let mut line_buffer = String::new();
                 
-                use std::io::Read;
                 while let Ok(n) = stderr.read(&mut buffer) {
                     if n == 0 || should_cancel() {
                         break;
@@ -273,6 +272,391 @@ impl PackageManager {
             success: status.success(),
         })
     }
+}
+
+// ===== 安装 / 卸载 流式命令 =====
+
+impl PackageManager {
+    /// 执行安装命令（流式输出）
+    pub fn install_streaming(&self, packages: &[String], output_tx: mpsc::UnboundedSender<String>) -> Result<UpdateOutput> {
+        reset_cancel();
+
+        use std::os::unix::process::CommandExt;
+
+        let mut child = if self.command == "pacman" {
+            let mut cmd = Command::new("sudo");
+            let mut args = vec!["pacman", "-S", "--noconfirm"];
+            let pkg_refs: Vec<&str> = packages.iter().map(|s| s.as_str()).collect();
+            args.extend(pkg_refs);
+            cmd.args(&args);
+            cmd.stdout(Stdio::piped());
+            cmd.stderr(Stdio::piped());
+            unsafe {
+                cmd.pre_exec(|| {
+                    libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
+                    Ok(())
+                });
+            }
+            cmd.spawn()?
+        } else {
+            let mut cmd = Command::new(&self.command);
+            let mut args = vec!["-S".to_string(), "--noconfirm".to_string()];
+            args.extend(packages.iter().cloned());
+            cmd.args(&args);
+            cmd.stdout(Stdio::piped());
+            cmd.stderr(Stdio::piped());
+            unsafe {
+                cmd.pre_exec(|| {
+                    libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
+                    Ok(())
+                });
+            }
+            cmd.spawn()?
+        };
+
+        CHILD_PID.store(child.id(), Ordering::SeqCst);
+
+        let stdout = child.stdout.take();
+        let stderr = child.stderr.take();
+
+        let output_tx_clone = output_tx.clone();
+        let stdout_handle = std::thread::spawn(move || {
+            read_stream_lines(stdout, &output_tx_clone, false)
+        });
+
+        let stderr_handle = std::thread::spawn(move || {
+            read_stream_lines(stderr, &output_tx, true)
+        });
+
+        let all_stdout = stdout_handle.join().unwrap_or_default();
+        let all_stderr = stderr_handle.join().unwrap_or_default();
+
+        let cancelled = should_cancel();
+        if cancelled {
+            let _ = child.kill();
+            let _ = child.wait();
+            CHILD_PID.store(0, Ordering::SeqCst);
+            return Ok(UpdateOutput {
+                stdout: all_stdout,
+                stderr: "安装已取消".to_string(),
+                success: false,
+            });
+        }
+
+        let status = child.wait()?;
+        CHILD_PID.store(0, Ordering::SeqCst);
+
+        Ok(UpdateOutput {
+            stdout: all_stdout,
+            stderr: all_stderr,
+            success: status.success(),
+        })
+    }
+
+    /// 执行卸载命令（流式输出）
+    pub fn remove_streaming(&self, packages: &[String], output_tx: mpsc::UnboundedSender<String>) -> Result<UpdateOutput> {
+        reset_cancel();
+
+        use std::os::unix::process::CommandExt;
+
+        let mut child = if self.command == "pacman" {
+            let mut cmd = Command::new("sudo");
+            let mut args = vec!["pacman", "-Rns", "--noconfirm"];
+            let pkg_refs: Vec<&str> = packages.iter().map(|s| s.as_str()).collect();
+            args.extend(pkg_refs);
+            cmd.args(&args);
+            cmd.stdout(Stdio::piped());
+            cmd.stderr(Stdio::piped());
+            unsafe {
+                cmd.pre_exec(|| {
+                    libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
+                    Ok(())
+                });
+            }
+            cmd.spawn()?
+        } else {
+            let mut cmd = Command::new(&self.command);
+            let mut args = vec!["-Rns".to_string(), "--noconfirm".to_string()];
+            args.extend(packages.iter().cloned());
+            cmd.args(&args);
+            cmd.stdout(Stdio::piped());
+            cmd.stderr(Stdio::piped());
+            unsafe {
+                cmd.pre_exec(|| {
+                    libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
+                    Ok(())
+                });
+            }
+            cmd.spawn()?
+        };
+
+        CHILD_PID.store(child.id(), Ordering::SeqCst);
+
+        let stdout = child.stdout.take();
+        let stderr = child.stderr.take();
+
+        let output_tx_clone = output_tx.clone();
+        let stdout_handle = std::thread::spawn(move || {
+            read_stream_lines(stdout, &output_tx_clone, false)
+        });
+
+        let stderr_handle = std::thread::spawn(move || {
+            read_stream_lines(stderr, &output_tx, true)
+        });
+
+        let all_stdout = stdout_handle.join().unwrap_or_default();
+        let all_stderr = stderr_handle.join().unwrap_or_default();
+
+        let cancelled = should_cancel();
+        if cancelled {
+            let _ = child.kill();
+            let _ = child.wait();
+            CHILD_PID.store(0, Ordering::SeqCst);
+            return Ok(UpdateOutput {
+                stdout: all_stdout,
+                stderr: "卸载已取消".to_string(),
+                success: false,
+            });
+        }
+
+        let status = child.wait()?;
+        CHILD_PID.store(0, Ordering::SeqCst);
+
+        Ok(UpdateOutput {
+            stdout: all_stdout,
+            stderr: all_stderr,
+            success: status.success(),
+        })
+    }
+
+    /// 获取显式安装的包列表（含大小和描述）
+    pub fn get_installed_packages_with_size(&self) -> Vec<InstalledPackage> {
+        // 使用 pacman -Qe 获取显式安装的包，再用 pacman -Qi 获取详情
+        let output = Command::new("pacman")
+            .args(["-Qei"])
+            .output();
+
+        match output {
+            Ok(o) if o.status.success() => {
+                parse_installed_packages(&String::from_utf8_lossy(&o.stdout))
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// 预览安装操作（显示将安装的包和依赖）
+    pub fn preview_install(&self, packages: &[String]) -> Vec<String> {
+        // 使用 pacman -Si 获取包信息
+        let mut lines = Vec::new();
+
+        for pkg in packages {
+            let output = Command::new("pacman")
+                .args(["-Si", pkg])
+                .output();
+
+            if let Ok(o) = output {
+                if o.status.success() {
+                    let info = String::from_utf8_lossy(&o.stdout);
+                    let mut name = String::new();
+                    let mut version = String::new();
+                    let mut size = String::new();
+                    let mut depends = String::new();
+
+                    for line in info.lines() {
+                        if let Some(colon) = line.find(':') {
+                            let key = line[..colon].trim();
+                            let val = line[colon + 1..].trim();
+                            match key {
+                                "Name" | "名称" => name = val.to_string(),
+                                "Version" | "版本" => version = val.to_string(),
+                                "Installed Size" | "Download Size" | "安装大小" | "下载大小" => {
+                                    if size.is_empty() {
+                                        size = val.to_string();
+                                    }
+                                }
+                                "Depends On" | "依赖于" => depends = val.to_string(),
+                                _ => {}
+                            }
+                        }
+                    }
+
+                    lines.push(format!("  {} {}", name, version));
+                    if !size.is_empty() {
+                        lines.push(format!("    大小: {}", size));
+                    }
+                    if !depends.is_empty() && depends != "None" {
+                        lines.push(format!("    依赖: {}", depends));
+                    }
+                    lines.push(String::new());
+                } else {
+                    lines.push(format!("  {} (未找到包信息)", pkg));
+                    lines.push(String::new());
+                }
+            }
+        }
+
+        lines
+    }
+
+    /// 预览卸载操作（显示将被移除的包）
+    pub fn preview_remove(&self, packages: &[String]) -> Vec<String> {
+        let mut args = vec!["-Rns".to_string(), "--print".to_string()];
+        args.extend(packages.iter().cloned());
+
+        let output = Command::new("pacman")
+            .args(&args)
+            .output();
+
+        match output {
+            Ok(o) if o.status.success() => {
+                String::from_utf8_lossy(&o.stdout)
+                    .lines()
+                    .map(|s| format!("  {}", s))
+                    .collect()
+            }
+            Ok(o) => {
+                // pacman --print 在 stderr 输出警告/错误
+                let stderr = String::from_utf8_lossy(&o.stderr);
+                let mut lines = vec!["  预览失败:".to_string()];
+                for line in stderr.lines() {
+                    lines.push(format!("  {}", line));
+                }
+                lines
+            }
+            Err(e) => {
+                vec![format!("  执行预览失败: {}", e)]
+            }
+        }
+    }
+}
+
+/// 已安装包信息
+#[derive(Debug, Clone)]
+pub struct InstalledPackage {
+    pub name: String,
+    pub version: String,
+    pub size: String,
+    pub description: String,
+}
+
+/// 解析 pacman -Qei 输出为 InstalledPackage 列表
+fn parse_installed_packages(output: &str) -> Vec<InstalledPackage> {
+    let mut packages = Vec::new();
+    let mut name = String::new();
+    let mut version = String::new();
+    let mut size = String::new();
+    let mut description = String::new();
+
+    for line in output.lines() {
+        if line.is_empty() || line.trim().is_empty() {
+            // 空行分隔不同的包
+            if !name.is_empty() {
+                packages.push(InstalledPackage {
+                    name: name.clone(),
+                    version: version.clone(),
+                    size: size.clone(),
+                    description: description.clone(),
+                });
+                name.clear();
+                version.clear();
+                size.clear();
+                description.clear();
+            }
+            continue;
+        }
+
+        if let Some(colon) = line.find(':') {
+            let key = line[..colon].trim();
+            let val = line[colon + 1..].trim();
+            match key {
+                "Name" | "名称" => name = val.to_string(),
+                "Version" | "版本" => version = val.to_string(),
+                "Installed Size" | "安装大小" => size = val.to_string(),
+                "Description" | "描述" => description = val.to_string(),
+                _ => {}
+            }
+        }
+    }
+
+    // 最后一个包
+    if !name.is_empty() {
+        packages.push(InstalledPackage {
+            name,
+            version,
+            size,
+            description,
+        });
+    }
+
+    packages
+}
+
+/// 从流中读取行并发送到 channel（通用辅助函数）
+fn read_stream_lines(
+    stream: Option<impl std::io::Read>,
+    tx: &mpsc::UnboundedSender<String>,
+    is_stderr: bool,
+) -> String {
+    let mut result = String::new();
+    if let Some(mut reader) = stream {
+        let mut buffer = [0u8; 1024];
+        let mut line_buffer = String::new();
+
+        while let Ok(n) = reader.read(&mut buffer) {
+            if n == 0 || should_cancel() {
+                break;
+            }
+
+            let chunk = String::from_utf8_lossy(&buffer[..n]);
+            for c in chunk.chars() {
+                match c {
+                    '\n' => {
+                        let cleaned = clean_terminal_output(&line_buffer);
+                        if !cleaned.trim().is_empty() {
+                            let msg = if is_stderr {
+                                format!("⚠ {}", cleaned)
+                            } else {
+                                cleaned.clone()
+                            };
+                            let _ = tx.send(msg);
+                            result.push_str(&cleaned);
+                            result.push('\n');
+                        }
+                        line_buffer.clear();
+                    }
+                    '\r' => {
+                        let cleaned = clean_terminal_output(&line_buffer);
+                        if !cleaned.trim().is_empty() {
+                            let msg = if is_stderr {
+                                format!("⚠ {}", cleaned)
+                            } else {
+                                cleaned.clone()
+                            };
+                            let _ = tx.send(msg);
+                        }
+                        line_buffer.clear();
+                    }
+                    _ => {
+                        line_buffer.push(c);
+                    }
+                }
+            }
+        }
+        if !line_buffer.is_empty() {
+            let cleaned = clean_terminal_output(&line_buffer);
+            if !cleaned.trim().is_empty() {
+                let msg = if is_stderr {
+                    format!("⚠ {}", cleaned)
+                } else {
+                    cleaned.clone()
+                };
+                let _ = tx.send(msg);
+                result.push_str(&cleaned);
+                result.push('\n');
+            }
+        }
+    }
+    result
 }
 
 /// 清理终端输出中的 ANSI 转义序列和特殊字符

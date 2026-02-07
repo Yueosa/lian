@@ -99,17 +99,10 @@ pub async fn run(api_key: String, config: Config) -> Result<()> {
                         match app.mode {
                             AppMode::Dashboard => {}
                             AppMode::Update => {
-                                if app.state == AppState::PreviewingUpdates {
-                                    // Esc 从预览回到 PreUpdate
-                                    app.state = AppState::PreUpdate;
-                                    app.update_preview.clear();
-                                    app.update_lines.clear();
-                                    app.reset_scroll();
-                                } else {
-                                    crate::package_manager::cancel_update();
-                                    app.mode = AppMode::Dashboard;
-                                    app.reset_scroll();
-                                }
+                                // Esc 返回 Dashboard
+                                crate::package_manager::cancel_update();
+                                app.mode = AppMode::Dashboard;
+                                app.reset_scroll();
                             }
                             AppMode::Query => {
                                 // Query 模式自己处理 Esc（详情→列表→Dashboard）
@@ -131,9 +124,16 @@ pub async fn run(api_key: String, config: Config) -> Result<()> {
                         if app.mode != AppMode::Update {
                             app.mode = AppMode::Update;
                             app.reset_update_state();
-                            // 如果 PM 已检测到，直接进入 PreUpdate
-                            if app.package_manager.is_some() {
-                                app.state = AppState::PreUpdate;
+                            // 如果 PM 已检测到，直接检查可用更新
+                            if let Some(pm) = app.package_manager.clone() {
+                                app.update_lines.push("正在检查可用更新...".to_string());
+                                let tx_clone = tx.clone();
+                                tokio::spawn(async move {
+                                    let updates = tokio::task::spawn_blocking(move || pm.check_updates())
+                                        .await
+                                        .unwrap_or_default();
+                                    let _ = tx_clone.send(AppEvent::UpdatePreviewReady(updates)).await;
+                                });
                             }
                         }
                     }
@@ -159,32 +159,21 @@ pub async fn run(api_key: String, config: Config) -> Result<()> {
                     _ => {
                         match app.mode {
                             AppMode::Update => {
-                                if key.code == KeyCode::Enter && app.state == AppState::PreUpdate {
-                                    // 第 1 次 Enter：检查可用更新
-                                    if let Some(pm) = app.package_manager.clone() {
-                                        app.update_lines.clear();
-                                        app.update_lines.push("正在检查可用更新...".to_string());
-                                        let tx_clone = tx.clone();
-                                        tokio::spawn(async move {
-                                            let updates = tokio::task::spawn_blocking(move || pm.check_updates())
-                                                .await
-                                                .unwrap_or_default();
-                                            let _ = tx_clone.send(AppEvent::UpdatePreviewReady(updates)).await;
-                                        });
-                                    }
-                                } else if key.code == KeyCode::Enter && app.state == AppState::PreviewingUpdates {
-                                    // 第 2 次 Enter：sudo 鉴权 + 开始更新
-                                    match validate_sudo_tui(&mut terminal) {
-                                        Ok(true) => {
-                                            update::spawn_update_task(&mut app, &tx);
-                                        }
-                                        Ok(false) => {
-                                            app.error_message = Some("sudo 验证失败，请确保你有 sudo 权限".to_string());
-                                            app.state = AppState::Error;
-                                        }
-                                        Err(e) => {
-                                            app.error_message = Some(format!("sudo 验证出错: {}", e));
-                                            app.state = AppState::Error;
+                                if key.code == KeyCode::Enter && app.state == AppState::PreviewingUpdates {
+                                    // Enter：sudo 鉴权 + 开始更新
+                                    if !app.update_preview.is_empty() {
+                                        match validate_sudo_tui(&mut terminal) {
+                                            Ok(true) => {
+                                                update::spawn_update_task(&mut app, &tx);
+                                            }
+                                            Ok(false) => {
+                                                app.error_message = Some("sudo 验证失败，请确保你有 sudo 权限".to_string());
+                                                app.state = AppState::Error;
+                                            }
+                                            Err(e) => {
+                                                app.error_message = Some(format!("sudo 验证出错: {}", e));
+                                                app.state = AppState::Error;
+                                            }
                                         }
                                     }
                                 } else {
@@ -215,11 +204,20 @@ pub async fn run(api_key: String, config: Config) -> Result<()> {
             match event {
                 AppEvent::PackageManagerDetected(pm) => {
                     app.package_manager = Some(pm);
-                    // 如果当前在更新模式且还在检测状态，推进到 PreUpdate
+                    // 如果当前在更新模式且还在检测状态，自动检查更新
                     if app.mode == AppMode::Update
                         && app.state == AppState::PackageManagerCheck
                     {
-                        app.state = AppState::PreUpdate;
+                        if let Some(pm) = app.package_manager.clone() {
+                            app.update_lines.push("正在检查可用更新...".to_string());
+                            let tx_clone = tx.clone();
+                            tokio::spawn(async move {
+                                let updates = tokio::task::spawn_blocking(move || pm.check_updates())
+                                    .await
+                                    .unwrap_or_default();
+                                let _ = tx_clone.send(AppEvent::UpdatePreviewReady(updates)).await;
+                            });
+                        }
                     }
                     // 检测到 PM 后，获取已安装包数量
                     if let Some(pm) = &app.package_manager {

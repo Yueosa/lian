@@ -53,7 +53,8 @@ pub fn handle_update_key(
     }
 }
 
-/// 生成更新前后的包变更摘要
+/// 生成更新前后的包变更摘要（用于更新完成后的 AI 分析 prompt）
+#[allow(dead_code)]
 pub fn generate_update_diff(before: Option<&str>, after: Option<&str>) -> String {
     use std::collections::HashMap;
 
@@ -279,7 +280,6 @@ pub fn render_update(f: &mut Frame, app: &App) {
 fn render_update_header(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let title = match app.state {
         AppState::PackageManagerCheck => "🔍 检测包管理器...",
-        AppState::PreUpdate => "📦 准备更新系统",
         AppState::PreviewingUpdates => "📝 可用更新列表",
         AppState::Updating => "⚙️  正在更新系统...",
         AppState::UpdateComplete => "✅ 更新完成",
@@ -319,8 +319,7 @@ fn render_update_content(f: &mut Frame, app: &App, area: ratatui::layout::Rect) 
 fn render_update_footer(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let owned_text: String;
     let footer_text = match app.state {
-        AppState::PackageManagerCheck => "请稍候...",
-        AppState::PreUpdate => "按 Enter 检查可用更新 | Esc 返回主页 | q 退出",
+        AppState::PackageManagerCheck => "正在检测包管理器...",
         AppState::PreviewingUpdates => {
             if app.update_preview.is_empty() {
                 "Esc 返回 | q 退出"
