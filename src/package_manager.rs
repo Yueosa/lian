@@ -1,5 +1,4 @@
 use anyhow::{anyhow, Result};
-use duct::cmd;
 use std::process::Command;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -61,30 +60,13 @@ impl PackageManager {
 
     /// 获取当前已安装的显式安装包列表
     pub fn get_explicit_packages(&self) -> Result<String> {
-        let output = cmd!("pacman", "-Qe").read()?;
-        Ok(output)
-    }
-
-    /// 执行系统更新命令（阻塞式，完成后返回）
-    #[allow(dead_code)]
-    pub fn update(&self, _sudo_password: Option<&str>) -> Result<UpdateOutput> {
-        // 使用 duct 来捕获输出
-        let handle = if self.command == "pacman" {
-            cmd!("sudo", "pacman", "-Syu", "--noconfirm")
-        } else {
-            cmd!(&self.command, "-Syu", "--noconfirm")
-        };
-
-        let output = handle.stdout_capture().stderr_capture().unchecked().run()?;
-
-        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-
-        Ok(UpdateOutput {
-            stdout: clean_terminal_output(&stdout),
-            stderr: clean_terminal_output(&stderr),
-            success: output.status.success(),
-        })
+        let output = Command::new("pacman")
+            .args(["-Qe"])
+            .output()?;
+        if !output.status.success() {
+            anyhow::bail!("pacman -Qe 执行失败");
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
 
     /// 模拟更新输出（测试模式）
