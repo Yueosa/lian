@@ -206,6 +206,22 @@ fn handle_preview_key(key: KeyEvent, app: &mut App) -> bool {
 /// 输出状态按键处理（Installing/Complete/Analyzing/Error）
 fn handle_output_key(key: KeyEvent, app: &mut App, term_height: u16) -> bool {
     match key.code {
+        KeyCode::Esc => {
+            match app.install_state {
+                InstallState::Installing | InstallState::Analyzing => {
+                    // 进行中：取消并返回搜索
+                    crate::package_manager::cancel_update();
+                    app.install_state = InstallState::Searching;
+                    app.install_scroll = 0;
+                }
+                _ => {
+                    // 完成/错误：返回主页
+                    app.mode = AppMode::Dashboard;
+                    app.reset_install_state();
+                }
+            }
+            true
+        }
         KeyCode::Up => {
             app.install_scroll = app.install_scroll.saturating_sub(1);
             true

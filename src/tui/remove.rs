@@ -208,6 +208,22 @@ fn handle_preview_key(key: KeyEvent, app: &mut App) -> bool {
 /// 输出状态按键处理
 fn handle_output_key(key: KeyEvent, app: &mut App, term_height: u16) -> bool {
     match key.code {
+        KeyCode::Esc => {
+            match app.remove_state {
+                RemoveState::Removing | RemoveState::Analyzing => {
+                    // 进行中：取消并返回浏览
+                    crate::package_manager::cancel_update();
+                    app.remove_state = RemoveState::Browsing;
+                    app.remove_scroll = 0;
+                }
+                _ => {
+                    // 完成/错误：返回主页
+                    app.mode = AppMode::Dashboard;
+                    app.reset_remove_state();
+                }
+            }
+            true
+        }
         KeyCode::Up => {
             app.remove_scroll = app.remove_scroll.saturating_sub(1);
             true
