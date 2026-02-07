@@ -1,8 +1,8 @@
 <div align="center">
 
-# Lian-Pacman 🤖📦
+# lian 🤖📦
 
-一个基于 Rust 的智能 Arch Linux 及其衍生发行版包管理更新助手，集成 AI 分析，提供精美的 TUI 界面。
+基于 Rust 的智能 TUI 包管理器，支持 Arch Linux 及其衍生发行版，集成 AI 分析。
 
 </div>
 
@@ -36,10 +36,9 @@
 ```bash
 # 从 GitHub Releases 下载
 # https://github.com/Yueosa/lian-pacman/releases
-# 文件名格式: lian-pacman_{版本}_linux_x86_64
 
-chmod +x lian-pacman_*_linux_x86_64
-sudo mv lian-pacman_*_linux_x86_64 /usr/local/bin/lian-pacman
+chmod +x lian_*_linux_x86_64
+sudo mv lian_*_linux_x86_64 /usr/local/bin/lian
 ```
 
 ### 方法二：从源码编译
@@ -52,7 +51,7 @@ paru -S rust
 # 编译安装
 cd lian-pacman
 cargo build --release
-sudo cp target/release/lian-pacman /usr/local/bin/
+sudo cp target/release/lian /usr/local/bin/
 ```
 
 ## ⚙️ 配置
@@ -64,17 +63,17 @@ sudo cp target/release/lian-pacman /usr/local/bin/
 **方式一：环境变量**
 
 ```bash
-echo 'export LIAN_PACMAN_AI_KEY="sk-your-key-here"' >> ~/.zshrc
+echo 'export LIAN_AI_KEY="sk-your-key-here"' >> ~/.zshrc
 source ~/.zshrc
 ```
 
 **方式二：配置文件**
 
-在 `~/.config/lian-pacman/config.toml` 中设置 `api_key` 字段（见下方）。
+在 `~/.config/lian/config.toml` 中设置 `api_key` 字段（见下方）。
 
 ### 配置文件 (可选)
 
-创建 `~/.config/lian-pacman/config.toml`：
+创建 `~/.config/lian/config.toml`：
 
 ```toml
 # AI API 地址 (可选，默认 DeepSeek，兼容 OpenAI 格式)
@@ -100,10 +99,7 @@ report_dir = "/home/your-username/.lian/pacman"
 
 ```bash
 # 运行程序
-lian-pacman
-
-# 测试模式 (不执行真实更新)
-lian-pacman --test
+lian
 ```
 
 ### 快捷键
@@ -130,7 +126,7 @@ ls ~/.lian/pacman/$(date +%Y/%m/%d)/
 ## � 故障排除
 
 ### API 请求失败
-1. 检查 API Key: `echo $LIAN_PACMAN_AI_KEY`
+1. 检查 API Key: `echo $LIAN_AI_KEY`
 2. 检查网络连接
 3. 确认 API 服务状态
 

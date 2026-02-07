@@ -7,10 +7,11 @@
 ```
 src/
 ├── main.rs              # 入口，参数解析，sudo 验证
-├── config.rs            # 配置加载 (~/.config/lian-pacman/config.toml)
+├── config.rs            # 配置加载 (~/.config/lian/config.toml)
 ├── package_manager.rs   # 包管理器检测和更新执行
 ├── prompt.rs            # AI 提示词生成
-├── deepseek.rs          # DeepSeek API 客户端
+├── deepseek.rs          # AI API 客户端
+├── sysinfo.rs           # 系统环境检测
 ├── report.rs            # 报告保存 (~/.lian/pacman/YYYY/MM/DD/)
 └── tui.rs               # TUI 界面和事件循环
 ```
@@ -21,7 +22,6 @@ src/
 
 - 检测顺序：paru → yay → pacman
 - `update_streaming()` - 实时输出的更新执行
-- `mock_update()` - 测试模式的模拟输出
 - 使用 `prctl(PR_SET_PDEATHSIG)` 确保子进程随父进程退出
 
 ### tui.rs
@@ -59,9 +59,6 @@ PackageManagerCheck → PreUpdate → Updating → UpdateComplete → Analyzing 
 ```bash
 # 调试运行
 RUST_LOG=debug cargo run
-
-# 测试模式（不执行真实更新）
-cargo run -- --test
 
 # 编译发布版本
 cargo build --release
