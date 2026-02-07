@@ -2,7 +2,7 @@
 
 # Lian-Pacman 🤖📦
 
-一个基于 Rust 的智能 Arch Linux 包管理更新助手，集成 DeepSeek AI 分析，提供精美的 TUI 界面。
+一个基于 Rust 的智能 Arch Linux 及其衍生发行版包管理更新助手，集成 AI 分析，提供精美的 TUI 界面。
 
 </div>
 
@@ -10,7 +10,7 @@
 >
 > 本项目是对 Claude AI 能力的探索实验. 这是作者第一次使用 Claude.
 > - **项目框架** - 由 Claude Sonnet 4.5 生成
-> - **Bug 修复与最终发布** - 由 Claude Opus 4.5 完成
+> - **Bug 修复与最终发布** - 由 Claude Opus 4.6 完成
 >
 > 感谢 Claude 在每个环节的支持！
 
@@ -18,7 +18,8 @@
 
 - 🎯 **智能检测** - 自动检测包管理器 (paru → yay → pacman)
 - 🖥️ **精美 TUI** - 基于 ratatui 的终端界面
-- 🤖 **AI 分析** - DeepSeek AI 深度分析更新内容
+- 🤖 **AI 分析** - AI 深度分析更新内容（默认 DeepSeek，支持自定义 API）
+- 🔍 **系统感知** - 自动检测系统环境，AI 分析更有针对性
 - 📊 **分类整理** - 按类型分类（内核、系统、驱动、应用等）
 - ⚠️ **风险提示** - 针对关键组件的更新警告
 - 💾 **自动存档** - 报告保存到 `~/.lian/pacman/YYYY/MM/DD/`
@@ -27,8 +28,8 @@
 
 ### 前置要求
 
-- Arch Linux (或衍生发行版)
-- [DeepSeek API Key](https://platform.deepseek.com/api_keys)
+- Arch Linux (或衍生发行版，如 Manjaro、EndeavourOS、CachyOS 等)
+- [DeepSeek API Key](https://platform.deepseek.com/api_keys) 或其他兼容 OpenAI 格式的 API
 
 ### 方法一：下载预编译版本
 
@@ -40,9 +41,6 @@
 chmod +x lian-pacman_*_linux_x86_64
 sudo mv lian-pacman_*_linux_x86_64 /usr/local/bin/lian-pacman
 ```
-
-> ⚠️ 预编译版本的 AI 提示词针对 **Hyprland + Wayland + NVIDIA** 环境优化。
-> 其他环境建议从源码编译并修改 `src/prompt.rs` 中的系统环境描述。
 
 ### 方法二：从源码编译
 
@@ -61,17 +59,33 @@ sudo cp target/release/lian-pacman /usr/local/bin/
 
 ### 设置 API Key
 
+两种方式任选其一（配置文件优先级更高）：
+
+**方式一：环境变量**
+
 ```bash
-# 添加到 shell 配置
-echo 'export DEEPSEEK_API_KEY="sk-your-key-here"' >> ~/.zshrc
+echo 'export LIAN_PACMAN_AI_KEY="sk-your-key-here"' >> ~/.zshrc
 source ~/.zshrc
 ```
+
+**方式二：配置文件**
+
+在 `~/.config/lian-pacman/config.toml` 中设置 `api_key` 字段（见下方）。
 
 ### 配置文件 (可选)
 
 创建 `~/.config/lian-pacman/config.toml`：
 
 ```toml
+# AI API 地址 (可选，默认 DeepSeek，兼容 OpenAI 格式)
+# api_url = "https://api.deepseek.com/chat/completions"
+
+# AI API Key (可选，优先级高于环境变量)
+# api_key = "sk-your-key-here"
+
+# HTTP 代理 (可选，支持 http/https/socks5)
+# proxy = "http://127.0.0.1:7890"
+
 # AI 模型: "deepseek-chat" (快速) 或 "deepseek-reasoner" (深度分析)
 model = "deepseek-reasoner"
 
@@ -113,25 +127,12 @@ ls -t ~/.lian/pacman/*/*/*/*.md | head -1
 ls ~/.lian/pacman/$(date +%Y/%m/%d)/
 ```
 
-## 🔧 自定义环境
-
-如果你的系统不是 Hyprland + Wayland + NVIDIA，编辑 `src/prompt.rs`：
-
-```rust
-## 系统环境信息
-- 发行版: Arch Linux
-- 桌面环境: KDE Plasma (X11)  // ← 修改为你的环境
-- 显卡: AMD                    // ← 修改为你的显卡
-```
-
-然后重新编译：`cargo build --release`
-
-## 🐛 故障排除
+## � 故障排除
 
 ### API 请求失败
-1. 检查 API Key: `echo $DEEPSEEK_API_KEY`
+1. 检查 API Key: `echo $LIAN_PACMAN_AI_KEY`
 2. 检查网络连接
-3. 确认 DeepSeek 服务状态
+3. 确认 API 服务状态
 
 ### 找不到包管理器
 ```bash
