@@ -1,9 +1,9 @@
 [package]
-name = "lian-pacman"
-version = "1.0.0"
+name = "lian"
+version = "2.0.0"
 edition = "2021"
 authors = ["Lian <yichengxin7@gmail.com>"]
-description = "有 AI 自动总结的 Syu"
+description = "基于 AI 的 TUI 包管理器"
 
 [dependencies]
 # TUI 相关
