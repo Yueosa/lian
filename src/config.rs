@@ -48,23 +48,6 @@ pub struct Config {
     pub ai: AiConfig,
 }
 
-impl Config {
-    /// 获取 API URL，优先配置文件，否则使用默认值
-    pub fn get_api_url(&self) -> &str {
-        self.api_url.as_deref().unwrap_or(DEFAULT_API_URL)
-    }
-
-    /// 检查指定操作是否启用 AI 分析
-    pub fn ai_enabled_for(&self, operation: &str) -> bool {
-        match operation {
-            "update" => self.ai.update,
-            "install" => self.ai.install,
-            "remove" => self.ai.remove,
-            _ => false,
-        }
-    }
-}
-
 impl Default for Config {
     fn default() -> Self {
         let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
@@ -81,6 +64,21 @@ impl Default for Config {
 }
 
 impl Config {
+    /// 获取 API URL，优先配置文件，否则使用默认值
+    pub fn get_api_url(&self) -> &str {
+        self.api_url.as_deref().unwrap_or(DEFAULT_API_URL)
+    }
+
+    /// 检查指定操作是否启用 AI 分析
+    pub fn ai_enabled_for(&self, operation: &str) -> bool {
+        match operation {
+            "update" => self.ai.update,
+            "install" => self.ai.install,
+            "remove" => self.ai.remove,
+            _ => false,
+        }
+    }
+
     pub fn load_or_default() -> Result<Self> {
         let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
         let config_path = PathBuf::from(&home).join(".config/lian/config.toml");
