@@ -1,6 +1,5 @@
 use super::layout;
 use super::state::{App, AppEvent, AppState, ViewMode};
-use crate::config::Config;
 use crate::deepseek::AiClient;
 use crate::prompt;
 use crate::report::ReportSaver;
@@ -181,10 +180,9 @@ pub fn handle_update_complete(
     app: &mut App,
     tx: &mpsc::Sender<AppEvent>,
     api_key: &str,
-    config: &Config,
 ) {
     if let Some(output) = &app.update_output {
-        if output.success && config.ai_enabled_for("update") {
+        if output.success && app.config.ai_enabled_for("update") {
             app.state = AppState::Analyzing;
 
             let pm_name = app.package_manager.as_ref().unwrap().name().to_string();
@@ -203,11 +201,11 @@ pub fn handle_update_complete(
 
             let client = AiClient::new(
                 api_key.to_string(),
-                config.get_api_url().to_string(),
-                config.proxy.as_deref(),
+                app.config.get_api_url().to_string(),
+                app.config.proxy.as_deref(),
             );
-            let model = config.model.clone();
-            let temperature = config.temperature;
+            let model = app.config.model.clone();
+            let temperature = app.config.temperature;
             let tx_clone = tx.clone();
 
             tokio::spawn(async move {
@@ -228,7 +226,7 @@ pub fn handle_update_complete(
     }
     // 如果 AI 未启用但更新成功，追加提示到输出
     if let Some(ref output) = app.update_output {
-        if output.success && !config.ai_enabled_for("update") {
+        if output.success && !app.config.ai_enabled_for("update") {
             let mut new_output = output.clone();
             new_output.stdout.push_str("\n\n[AI 分析已关闭，可在设置中开启]");
             app.update_output = Some(new_output);
@@ -241,14 +239,13 @@ pub fn handle_analysis_complete(
     app: &mut App,
     analysis: String,
     tx: &mpsc::Sender<AppEvent>,
-    config: &Config,
 ) {
     app.analysis_result = Some(analysis.clone());
     app.state = AppState::AnalysisComplete;
     app.view_mode = ViewMode::AIAnalysis;
     app.reset_scroll();
 
-    let report_dir = config.report_dir.clone();
+    let report_dir = app.config.report_dir.clone();
     let distro_name = app.system_info.as_ref()
         .map(|info| info.distro.clone())
         .unwrap_or_else(|| "Linux".to_string());

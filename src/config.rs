@@ -93,4 +93,15 @@ impl Config {
             Ok(Self::default())
         }
     }
+
+    /// 保存配置到 ~/.config/lian/config.toml
+    pub fn save(&self) -> Result<()> {
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+        let config_dir = PathBuf::from(&home).join(".config/lian");
+        fs::create_dir_all(&config_dir)?;
+        let config_path = config_dir.join("config.toml");
+        let content = toml::to_string_pretty(self)?;
+        fs::write(config_path, content)?;
+        Ok(())
+    }
 }

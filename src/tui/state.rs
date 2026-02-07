@@ -1,3 +1,4 @@
+use crate::config::Config;
 use crate::package_manager::{InstalledPackage, PackageDetail, PackageInfo, PackageManager, UpdateOutput};
 use crate::sysinfo::SystemInfo;
 use std::collections::HashSet;
@@ -69,6 +70,26 @@ pub enum RemoveState {
     Error,
 }
 
+/// 设置页面项目类型
+#[derive(Debug, Clone)]
+pub enum SettingsItem {
+    /// 分组标题（不可选中）
+    Section(String),
+    /// 复选框开关项
+    Toggle {
+        label: String,
+        key: String,
+        value: bool,
+    },
+    /// 文本编辑项
+    TextEdit {
+        label: String,
+        key: String,
+        value: String,
+        masked: bool,
+    },
+}
+
 #[derive(Debug)]
 pub enum AppEvent {
     PackageManagerDetected(PackageManager),
@@ -107,6 +128,7 @@ pub enum AppEvent {
 
 pub struct App {
     pub mode: AppMode,
+    pub config: Config,
     pub state: AppState,
     pub view_mode: ViewMode,
     pub package_manager: Option<PackageManager>,
@@ -172,12 +194,21 @@ pub struct App {
     pub remove_loading: bool,
     pub remove_view_mode: ViewMode,
     pub remove_saved_report: Option<String>,
+    // 设置相关状态
+    pub settings_items: Vec<SettingsItem>,
+    pub settings_selected: usize,
+    pub settings_editing: bool,
+    pub settings_edit_buffer: String,
+    pub settings_edit_cursor: usize,
+    pub settings_message: Option<String>,
+    pub settings_scroll: usize,
 }
 
 impl App {
-    pub fn new() -> Self {
+    pub fn new(config: Config) -> Self {
         Self {
             mode: AppMode::Dashboard,
+            config,
             state: AppState::PackageManagerCheck,
             view_mode: ViewMode::UpdateLog,
             package_manager: None,
@@ -242,6 +273,14 @@ impl App {
             remove_loading: false,
             remove_view_mode: ViewMode::UpdateLog,
             remove_saved_report: None,
+            // 设置
+            settings_items: Vec::new(),
+            settings_selected: 0,
+            settings_editing: false,
+            settings_edit_buffer: String::new(),
+            settings_edit_cursor: 0,
+            settings_message: None,
+            settings_scroll: 0,
         }
     }
 
@@ -528,5 +567,168 @@ impl App {
         self.remove_selected = 0;
         // 清除不在筛选结果中的标记
         self.remove_marked.retain(|idx| self.remove_filtered.contains(idx));
+    }
+
+    /// 从当前 config 构建设置项列表
+    pub fn build_settings_items(&mut self) {
+        self.settings_items = vec![
+            SettingsItem::Section("AI 分析".to_string()),
+            SettingsItem::Toggle {
+                label: "系统更新后自动分析".to_string(),
+                key: "ai.update".to_string(),
+                value: self.config.ai.update,
+            },
+            SettingsItem::Toggle {
+                label: "安装软件包后分析".to_string(),
+                key: "ai.install".to_string(),
+                value: self.config.ai.install,
+            },
+            SettingsItem::Toggle {
+                label: "卸载软件包后分析".to_string(),
+                key: "ai.remove".to_string(),
+                value: self.config.ai.remove,
+            },
+            SettingsItem::Section("AI 配置".to_string()),
+            SettingsItem::TextEdit {
+                label: "模型".to_string(),
+                key: "model".to_string(),
+                value: self.config.model.clone(),
+                masked: false,
+            },
+            SettingsItem::TextEdit {
+                label: "温度".to_string(),
+                key: "temperature".to_string(),
+                value: format!("{}", self.config.temperature),
+                masked: false,
+            },
+            SettingsItem::TextEdit {
+                label: "API 地址".to_string(),
+                key: "api_url".to_string(),
+                value: self.config.api_url.clone().unwrap_or_default(),
+                masked: false,
+            },
+            SettingsItem::TextEdit {
+                label: "API Key".to_string(),
+                key: "api_key".to_string(),
+                value: self.config.api_key.clone().unwrap_or_default(),
+                masked: true,
+            },
+            SettingsItem::TextEdit {
+                label: "代理".to_string(),
+                key: "proxy".to_string(),
+                value: self.config.proxy.clone().unwrap_or_default(),
+                masked: false,
+            },
+            SettingsItem::Section("报告".to_string()),
+            SettingsItem::TextEdit {
+                label: "保存目录".to_string(),
+                key: "report_dir".to_string(),
+                value: self.config.report_dir.display().to_string(),
+                masked: false,
+            },
+        ];
+        self.settings_selected = 0;
+        self.settings_editing = false;
+        self.settings_message = None;
+        self.settings_scroll = 0;
+    }
+
+    /// 切换 Toggle 项的值并同步到 config
+    pub fn toggle_settings_item(&mut self) {
+        // 获取可聚焦项索引列表
+        let focusable: Vec<usize> = self.settings_items.iter().enumerate()
+            .filter(|(_, item)| !matches!(item, SettingsItem::Section(_)))
+            .map(|(i, _)| i)
+            .collect();
+
+        if let Some(&real_idx) = focusable.get(self.settings_selected) {
+            if let SettingsItem::Toggle { key, value, .. } = &self.settings_items[real_idx] {
+                let new_val = !*value;
+                let key = key.clone();
+                // 更新 items
+                if let SettingsItem::Toggle { value: v, .. } = &mut self.settings_items[real_idx] {
+                    *v = new_val;
+                }
+                // 同步到 config
+                match key.as_str() {
+                    "ai.update" => self.config.ai.update = new_val,
+                    "ai.install" => self.config.ai.install = new_val,
+                    "ai.remove" => self.config.ai.remove = new_val,
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    /// 开始编辑 TextEdit 项
+    pub fn start_settings_edit(&mut self) {
+        let focusable: Vec<usize> = self.settings_items.iter().enumerate()
+            .filter(|(_, item)| !matches!(item, SettingsItem::Section(_)))
+            .map(|(i, _)| i)
+            .collect();
+
+        if let Some(&real_idx) = focusable.get(self.settings_selected) {
+            if let SettingsItem::TextEdit { value, .. } = &self.settings_items[real_idx] {
+                self.settings_edit_buffer = value.clone();
+                self.settings_edit_cursor = self.settings_edit_buffer.len();
+                self.settings_editing = true;
+            }
+        }
+    }
+
+    /// 确认编辑并写回 config
+    pub fn confirm_settings_edit(&mut self) {
+        let focusable: Vec<usize> = self.settings_items.iter().enumerate()
+            .filter(|(_, item)| !matches!(item, SettingsItem::Section(_)))
+            .map(|(i, _)| i)
+            .collect();
+
+        if let Some(&real_idx) = focusable.get(self.settings_selected) {
+            let buf = self.settings_edit_buffer.clone();
+            if let SettingsItem::TextEdit { key, value, .. } = &mut self.settings_items[real_idx] {
+                *value = buf.clone();
+                match key.as_str() {
+                    "model" => self.config.model = buf,
+                    "temperature" => {
+                        if let Ok(t) = buf.parse::<f32>() {
+                            self.config.temperature = t;
+                        }
+                    }
+                    "api_url" => {
+                        self.config.api_url = if buf.is_empty() { None } else { Some(buf) };
+                    }
+                    "api_key" => {
+                        self.config.api_key = if buf.is_empty() { None } else { Some(buf) };
+                    }
+                    "proxy" => {
+                        self.config.proxy = if buf.is_empty() { None } else { Some(buf) };
+                    }
+                    "report_dir" => {
+                        self.config.report_dir = std::path::PathBuf::from(buf);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        self.settings_editing = false;
+    }
+
+    /// 保存配置到磁盘
+    pub fn save_settings(&mut self) {
+        match self.config.save() {
+            Ok(()) => {
+                self.settings_message = Some("✓ 已保存到 ~/.config/lian/config.toml".to_string());
+            }
+            Err(e) => {
+                self.settings_message = Some(format!("✗ 保存失败: {}", e));
+            }
+        }
+    }
+
+    /// 获取可聚焦项数量
+    pub fn settings_focusable_count(&self) -> usize {
+        self.settings_items.iter()
+            .filter(|item| !matches!(item, SettingsItem::Section(_)))
+            .count()
     }
 }

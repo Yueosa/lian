@@ -354,10 +354,9 @@ pub fn handle_install_complete(
     app: &mut App,
     tx: &mpsc::Sender<AppEvent>,
     api_key: &str,
-    config: &crate::config::Config,
 ) {
     if let Some(output) = &app.install_output {
-        if output.success && config.ai_enabled_for("install") {
+        if output.success && app.config.ai_enabled_for("install") {
             app.install_state = InstallState::Analyzing;
 
             let pm_name = app.package_manager.as_ref().unwrap().name().to_string();
@@ -378,11 +377,11 @@ pub fn handle_install_complete(
 
             let client = crate::deepseek::AiClient::new(
                 api_key.to_string(),
-                config.get_api_url().to_string(),
-                config.proxy.as_deref(),
+                app.config.get_api_url().to_string(),
+                app.config.proxy.as_deref(),
             );
-            let model = config.model.clone();
-            let temperature = config.temperature;
+            let model = app.config.model.clone();
+            let temperature = app.config.temperature;
             let tx_clone = tx.clone();
 
             tokio::spawn(async move {
@@ -397,7 +396,7 @@ pub fn handle_install_complete(
                     }
                 }
             });
-        } else if output.success && !config.ai_enabled_for("install") {
+        } else if output.success && !app.config.ai_enabled_for("install") {
             let mut new_output = output.clone();
             new_output.stdout.push_str("\n\n[AI 分析已关闭，可在设置中开启]");
             app.install_output = Some(new_output);
@@ -410,14 +409,13 @@ pub fn handle_install_analysis_complete(
     app: &mut App,
     analysis: String,
     tx: &mpsc::Sender<AppEvent>,
-    config: &crate::config::Config,
 ) {
     app.install_analysis = Some(analysis.clone());
     app.install_state = InstallState::AnalysisComplete;
     app.install_view_mode = ViewMode::AIAnalysis;
     app.install_scroll = 0;
 
-    let report_dir = config.report_dir.clone();
+    let report_dir = app.config.report_dir.clone();
     let distro_name = app.system_info.as_ref()
         .map(|info| info.distro.clone())
         .unwrap_or_else(|| "Linux".to_string());

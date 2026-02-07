@@ -30,7 +30,7 @@ pub async fn run(api_key: String, config: Config) -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let mut app = App::new();
+    let mut app = App::new(config);
 
     let (tx, mut rx) = mpsc::channel(32);
 
@@ -176,6 +176,12 @@ pub async fn run(api_key: String, config: Config) -> Result<()> {
                                     term_size.height,
                                 );
                             }
+                            AppMode::Settings => {
+                                settings::handle_settings_key(
+                                    crossterm::event::KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+                                    &mut app,
+                                );
+                            }
                             _ => {
                                 app.mode = AppMode::Dashboard;
                                 app.reset_scroll();
@@ -233,7 +239,7 @@ pub async fn run(api_key: String, config: Config) -> Result<()> {
                     }
                     KeyCode::Char('C') => {
                         app.mode = AppMode::Settings;
-                        app.reset_scroll();
+                        app.build_settings_items();
                     }
                     // 委托给当前模式处理
                     _ => {
@@ -369,10 +375,10 @@ pub async fn run(api_key: String, config: Config) -> Result<()> {
                     app.add_update_line("--- 更新完成 ---".to_string());
 
                     // 启动 AI 分析
-                    update::handle_update_complete(&mut app, &tx, &api_key, &config);
+                    update::handle_update_complete(&mut app, &tx, &api_key);
                 }
                 AppEvent::AnalysisComplete(analysis) => {
-                    update::handle_analysis_complete(&mut app, analysis, &tx, &config);
+                    update::handle_analysis_complete(&mut app, analysis, &tx);
                 }
                 AppEvent::ReportSaved(path) => {
                     // 根据当前模式分配报告路径
@@ -442,7 +448,7 @@ pub async fn run(api_key: String, config: Config) -> Result<()> {
                     app.install_output = Some(output);
                     app.install_state = state::InstallState::InstallComplete;
                     app.add_install_line("--- 安装完成 ---".to_string());
-                    install::handle_install_complete(&mut app, &tx, &api_key, &config);
+                    install::handle_install_complete(&mut app, &tx, &api_key);
                     // 刷新已安装包数量
                     if let Some(pm) = &app.package_manager {
                         let count = pm.count_installed();
@@ -450,7 +456,7 @@ pub async fn run(api_key: String, config: Config) -> Result<()> {
                     }
                 }
                 AppEvent::InstallAnalysisComplete(analysis) => {
-                    install::handle_install_analysis_complete(&mut app, analysis, &tx, &config);
+                    install::handle_install_analysis_complete(&mut app, analysis, &tx);
                 }
                 // ===== Remove 事件 =====
                 AppEvent::RemovePackagesLoaded(packages) => {
@@ -469,7 +475,7 @@ pub async fn run(api_key: String, config: Config) -> Result<()> {
                     app.remove_output = Some(output);
                     app.remove_state = state::RemoveState::RemoveComplete;
                     app.add_remove_line("--- 卸载完成 ---".to_string());
-                    remove::handle_remove_complete(&mut app, &tx, &api_key, &config);
+                    remove::handle_remove_complete(&mut app, &tx, &api_key);
                     // 刷新已安装包数量
                     if let Some(pm) = &app.package_manager {
                         let count = pm.count_installed();
@@ -477,7 +483,7 @@ pub async fn run(api_key: String, config: Config) -> Result<()> {
                     }
                 }
                 AppEvent::RemoveAnalysisComplete(analysis) => {
-                    remove::handle_remove_analysis_complete(&mut app, analysis, &tx, &config);
+                    remove::handle_remove_analysis_complete(&mut app, analysis, &tx);
                 }
             }
         }
