@@ -4,13 +4,14 @@ use super::state::{App, AppEvent, QueryPanel, QueryView};
 use crate::package_manager::PackageInfo;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Layout, Margin, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
     Frame,
 };
 use tokio::sync::mpsc;
+use unicode_width::UnicodeWidthStr;
 
 /// 从 App 状态构建 InputBox 用于渲染
 fn input_box_from_app(app: &App) -> InputBox {
@@ -25,15 +26,29 @@ fn input_box_from_app(app: &App) -> InputBox {
     ib
 }
 
+/// 计算详情视图总行数（用于滚动边界）
+pub fn detail_total_lines(app: &App) -> usize {
+    let field_count = app.query_detail.as_ref().map(|d| d.fields.len()).unwrap_or(0);
+    let file_lines = if !app.query_files.is_empty() {
+        2 + app.query_files.len()
+    } else if app.query_detail.is_some() {
+        2
+    } else {
+        0
+    };
+    field_count + file_lines
+}
+
 /// 处理查询模式按键
 pub fn handle_query_key(
     key: KeyEvent,
     app: &mut App,
     tx: &mpsc::Sender<AppEvent>,
+    term_height: u16,
 ) {
     match app.query_view {
         QueryView::List => handle_list_key(key, app, tx),
-        QueryView::Detail => handle_detail_key(key, app),
+        QueryView::Detail => handle_detail_key(key, app, term_height),
     }
 }
 
@@ -263,7 +278,11 @@ fn load_package_detail(app: &App, pkg: &PackageInfo, tx: &mpsc::Sender<AppEvent>
 }
 
 /// 详情视图按键处理
-fn handle_detail_key(key: KeyEvent, app: &mut App) {
+fn handle_detail_key(key: KeyEvent, app: &mut App, term_height: u16) {
+    let total = detail_total_lines(app);
+    let visible = term_height.saturating_sub(8) as usize;
+    let max_scroll = total.saturating_sub(visible);
+
     match key.code {
         KeyCode::Esc => {
             app.query_view = QueryView::List;
@@ -275,13 +294,15 @@ fn handle_detail_key(key: KeyEvent, app: &mut App) {
             app.query_detail_scroll = app.query_detail_scroll.saturating_sub(1);
         }
         KeyCode::Down => {
-            app.query_detail_scroll += 1;
+            if app.query_detail_scroll < max_scroll {
+                app.query_detail_scroll += 1;
+            }
         }
         KeyCode::PageUp => {
             app.query_detail_scroll = app.query_detail_scroll.saturating_sub(10);
         }
         KeyCode::PageDown => {
-            app.query_detail_scroll += 10;
+            app.query_detail_scroll = (app.query_detail_scroll + 10).min(max_scroll);
         }
         _ => {}
     }
@@ -370,18 +391,24 @@ fn render_result_panel(
     let inner = block.inner(area);
     f.render_widget(block, area);
 
+    // 内部水平边距
+    let padded = inner.inner(Margin {
+        horizontal: 1,
+        vertical: 0,
+    });
+
     if results.is_empty() {
         let empty = Paragraph::new(Line::from(Span::styled(
-            "  无结果",
+            "无结果",
             Style::default().fg(Color::DarkGray),
         )));
-        f.render_widget(empty, inner);
+        f.render_widget(empty, padded);
         return;
     }
 
     // 每个包占 2 行（名称 + 描述）
     let item_height = 2usize;
-    let visible_items = (inner.height as usize) / item_height;
+    let visible_items = (padded.height as usize) / item_height;
     // 计算滚动偏移以确保选中项可见
     let scroll = if selected >= visible_items {
         selected - visible_items + 1
@@ -424,7 +451,7 @@ fn render_result_panel(
     }
 
     let paragraph = Paragraph::new(lines);
-    f.render_widget(paragraph, inner);
+    f.render_widget(paragraph, padded);
 
     // 滚动条
     if results.len() > visible_items {
@@ -455,16 +482,11 @@ fn render_detail_view(f: &mut Frame, app: &App) {
         ])
         .split(area);
 
-    // Header - 从详情字段中提取包名
+    // Header - 使用详情的第一个字段作为包名（兼容所有语言环境）
     let pkg_name = app
         .query_detail
         .as_ref()
-        .and_then(|d| {
-            d.fields
-                .iter()
-                .find(|(k, _)| k.contains("Name") || k.contains("名称"))
-                .map(|(_, v)| v.as_str())
-        })
+        .and_then(|d| d.fields.first().map(|(_, v)| v.as_str()))
         .unwrap_or("未知");
     layout::render_header(f, &format!("📦 包信息 - {}", pkg_name), chunks[0]);
 
@@ -483,14 +505,24 @@ fn render_detail_content(f: &mut Frame, app: &App, area: Rect) {
     let inner = block.inner(area);
     f.render_widget(block, area);
 
+    // 内部水平边距
+    let padded = inner.inner(Margin {
+        horizontal: 1,
+        vertical: 0,
+    });
+
     let mut all_lines: Vec<Line> = Vec::new();
 
-    // 包信息字段
+    // 包信息字段（CJK 对齐）
     if let Some(detail) = &app.query_detail {
         for (key, value) in &detail.fields {
+            let key_width = UnicodeWidthStr::width(key.as_str());
+            let target_width = 18;
+            let pad = target_width.saturating_sub(key_width);
+            let padded_key = format!("{}{} ", key, " ".repeat(pad));
             all_lines.push(Line::from(vec![
                 Span::styled(
-                    format!("{:<18} ", key),
+                    padded_key,
                     Style::default()
                         .fg(Color::Cyan)
                         .add_modifier(Modifier::BOLD),
@@ -524,7 +556,7 @@ fn render_detail_content(f: &mut Frame, app: &App, area: Rect) {
     }
 
     let total_lines = all_lines.len();
-    let visible_height = inner.height as usize;
+    let visible_height = padded.height as usize;
     let max_scroll = total_lines.saturating_sub(visible_height);
     let actual_scroll = app.query_detail_scroll.min(max_scroll);
 
@@ -535,7 +567,7 @@ fn render_detail_content(f: &mut Frame, app: &App, area: Rect) {
         .collect();
 
     let paragraph = Paragraph::new(visible);
-    f.render_widget(paragraph, inner);
+    f.render_widget(paragraph, padded);
 
     // 滚动条
     if total_lines > visible_height {
@@ -545,7 +577,7 @@ fn render_detail_content(f: &mut Frame, app: &App, area: Rect) {
         let mut scrollbar_state = ScrollbarState::new(total_lines).position(actual_scroll);
         f.render_stateful_widget(
             scrollbar,
-            area.inner(ratatui::layout::Margin {
+            area.inner(Margin {
                 horizontal: 0,
                 vertical: 1,
             }),

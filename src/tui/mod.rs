@@ -67,6 +67,14 @@ pub async fn run(api_key: String, config: Config) -> Result<()> {
             let visible_height = layout::visible_content_height(term_size.height);
             app.clamp_scroll(content.len(), visible_height);
         }
+        // 查询详情视图 clamp scroll
+        if app.mode == AppMode::Query && app.query_view == state::QueryView::Detail {
+            let term_size = terminal.size()?;
+            let total = query::detail_total_lines(&app);
+            let visible = term_size.height.saturating_sub(8) as usize;
+            let max_scroll = total.saturating_sub(visible);
+            app.query_detail_scroll = app.query_detail_scroll.min(max_scroll);
+        }
 
         terminal.draw(|f| ui(f, &app))?;
 
@@ -101,6 +109,7 @@ pub async fn run(api_key: String, config: Config) -> Result<()> {
                                     crossterm::event::KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
                                     &mut app,
                                     &tx,
+                                    term_size.height,
                                 );
                             }
                             _ => {
@@ -142,19 +151,28 @@ pub async fn run(api_key: String, config: Config) -> Result<()> {
                     _ => {
                         match app.mode {
                             AppMode::Update => {
-                                // Enter 在 PreUpdate 状态需要先进行 sudo 鉴权
                                 if key.code == KeyCode::Enter && app.state == AppState::PreUpdate {
-                                    match validate_sudo_tui(&mut terminal) {
-                                        Ok(true) => {
-                                            update::spawn_update_task(&mut app, &tx);
-                                        }
-                                        Ok(false) => {
-                                            app.error_message = Some("sudo 验证失败，请确保你有 sudo 权限".to_string());
-                                            app.state = AppState::Error;
-                                        }
-                                        Err(e) => {
-                                            app.error_message = Some(format!("sudo 验证出错: {}", e));
-                                            app.state = AppState::Error;
+                                    if let Some(pm) = app.package_manager.clone() {
+                                        match run_update_foreground(&mut terminal, &pm) {
+                                            Ok((success, packages_before, packages_after)) => {
+                                                let diff_summary = update::generate_update_diff(
+                                                    packages_before.as_deref(),
+                                                    packages_after.as_deref(),
+                                                );
+                                                app.update_output = Some(crate::package_manager::UpdateOutput {
+                                                    stdout: diff_summary,
+                                                    stderr: String::new(),
+                                                    success,
+                                                });
+                                                app.packages_before = packages_before;
+                                                app.packages_after = packages_after;
+                                                app.state = AppState::UpdateComplete;
+                                                update::handle_update_complete(&mut app, &tx, &api_key, &config);
+                                            }
+                                            Err(e) => {
+                                                app.error_message = Some(format!("{}", e));
+                                                app.state = AppState::Error;
+                                            }
                                         }
                                     }
                                 } else {
@@ -168,7 +186,7 @@ pub async fn run(api_key: String, config: Config) -> Result<()> {
                                 remove::handle_remove_key(key, &mut app);
                             }
                             AppMode::Query => {
-                                query::handle_query_key(key, &mut app, &tx);
+                                query::handle_query_key(key, &mut app, &tx, term_size.height);
                             }
                             AppMode::Settings => {
                                 settings::handle_settings_key(key, &mut app);
@@ -269,7 +287,83 @@ pub async fn run(api_key: String, config: Config) -> Result<()> {
     Ok(())
 }
 
+/// 前台执行系统更新（退出 TUI → sudo → 更新 → 恢复 TUI）
+fn run_update_foreground(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    pm: &PackageManager,
+) -> Result<(bool, Option<String>, Option<String>)> {
+    // 获取更新前包列表
+    let packages_before = pm.get_explicit_packages().ok();
+
+    // 退出 TUI
+    disable_raw_mode()?;
+    execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        DisableMouseCapture
+    )?;
+    terminal.show_cursor()?;
+
+    // sudo 鉴权
+    println!("🔐 需要 sudo 权限来执行系统更新\n");
+    let sudo_status = std::process::Command::new("sudo").arg("-v").status()?;
+    if !sudo_status.success() {
+        println!("\n❌ sudo 验证失败");
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+        enable_raw_mode()?;
+        execute!(
+            terminal.backend_mut(),
+            EnterAlternateScreen,
+            EnableMouseCapture
+        )?;
+        terminal.hide_cursor()?;
+        terminal.clear()?;
+        anyhow::bail!("sudo 验证失败，请确保你有 sudo 权限");
+    }
+    println!("✅ sudo 验证成功！\n");
+    println!("📦 开始系统更新...\n");
+
+    // 前台运行更新（用户可手动确认 y/n）
+    let status = if pm.command == "pacman" {
+        std::process::Command::new("sudo")
+            .args(["pacman", "-Syu"])
+            .status()?
+    } else {
+        std::process::Command::new(&pm.command)
+            .args(["-Syu"])
+            .status()?
+    };
+
+    // 获取更新后包列表
+    let packages_after = pm.get_explicit_packages().ok();
+
+    println!();
+    if status.success() {
+        println!("✅ 更新完成！");
+    } else {
+        println!("⚠️  更新过程中可能出现问题");
+    }
+    println!("\n按 Enter 返回...");
+
+    // 等待按键
+    let mut buf = String::new();
+    let _ = std::io::stdin().read_line(&mut buf);
+
+    // 恢复 TUI
+    enable_raw_mode()?;
+    execute!(
+        terminal.backend_mut(),
+        EnterAlternateScreen,
+        EnableMouseCapture
+    )?;
+    terminal.hide_cursor()?;
+    terminal.clear()?;
+
+    Ok((status.success(), packages_before, packages_after))
+}
+
 /// 临时退出 TUI 执行 sudo 鉴权，成功后恢复 TUI
+#[allow(dead_code)]
 fn validate_sudo_tui(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
 ) -> Result<bool> {
