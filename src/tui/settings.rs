@@ -11,7 +11,7 @@ use unicode_width::UnicodeWidthStr;
 
 /// 处理设置模式按键
 pub fn handle_settings_key(key: KeyEvent, app: &mut App) -> bool {
-    if app.settings_editing {
+    if app.settings.editing {
         handle_editing_key(key, app)
     } else {
         handle_browsing_key(key, app)
@@ -34,26 +34,26 @@ fn handle_browsing_key(key: KeyEvent, app: &mut App) -> bool {
             true
         }
         KeyCode::Up => {
-            app.settings_selected = app.settings_selected.saturating_sub(1);
-            app.settings_message = None;
+            app.settings.selected = app.settings.selected.saturating_sub(1);
+            app.settings.message = None;
             true
         }
         KeyCode::Down => {
-            if app.settings_selected + 1 < total {
-                app.settings_selected += 1;
+            if app.settings.selected + 1 < total {
+                app.settings.selected += 1;
             }
-            app.settings_message = None;
+            app.settings.message = None;
             true
         }
         KeyCode::Enter | KeyCode::Char(' ') => {
             // 获取当前选中项的实际索引
-            let focusable: Vec<usize> = app.settings_items.iter().enumerate()
+            let focusable: Vec<usize> = app.settings.items.iter().enumerate()
                 .filter(|(_, item)| !matches!(item, SettingsItem::Section(_)))
                 .map(|(i, _)| i)
                 .collect();
 
-            if let Some(&real_idx) = focusable.get(app.settings_selected) {
-                match &app.settings_items[real_idx] {
+            if let Some(&real_idx) = focusable.get(app.settings.selected) {
+                match &app.settings.items[real_idx] {
                     SettingsItem::Toggle { .. } => {
                         app.toggle_settings_item();
                     }
@@ -63,7 +63,7 @@ fn handle_browsing_key(key: KeyEvent, app: &mut App) -> bool {
                     _ => {}
                 }
             }
-            app.settings_message = None;
+            app.settings.message = None;
             true
         }
         KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -79,7 +79,7 @@ fn handle_editing_key(key: KeyEvent, app: &mut App) -> bool {
     match key.code {
         KeyCode::Esc => {
             // 取消编辑
-            app.settings_editing = false;
+            app.settings.editing = false;
             true
         }
         KeyCode::Enter => {
@@ -88,76 +88,76 @@ fn handle_editing_key(key: KeyEvent, app: &mut App) -> bool {
             true
         }
         KeyCode::Backspace => {
-            if app.settings_edit_cursor > 0 {
+            if app.settings.edit_cursor > 0 {
                 // UTF-8 安全删除
-                let byte_pos = app.settings_edit_buffer
+                let byte_pos = app.settings.edit_buffer
                     .char_indices()
-                    .nth(app.settings_edit_cursor - 1)
+                    .nth(app.settings.edit_cursor - 1)
                     .map(|(i, _)| i)
                     .unwrap_or(0);
-                let next_byte = app.settings_edit_buffer
+                let next_byte = app.settings.edit_buffer
                     .char_indices()
-                    .nth(app.settings_edit_cursor)
+                    .nth(app.settings.edit_cursor)
                     .map(|(i, _)| i)
-                    .unwrap_or(app.settings_edit_buffer.len());
-                app.settings_edit_buffer = format!(
+                    .unwrap_or(app.settings.edit_buffer.len());
+                app.settings.edit_buffer = format!(
                     "{}{}",
-                    &app.settings_edit_buffer[..byte_pos],
-                    &app.settings_edit_buffer[next_byte..]
+                    &app.settings.edit_buffer[..byte_pos],
+                    &app.settings.edit_buffer[next_byte..]
                 );
-                app.settings_edit_cursor -= 1;
+                app.settings.edit_cursor -= 1;
             }
             true
         }
         KeyCode::Delete => {
-            let char_count = app.settings_edit_buffer.chars().count();
-            if app.settings_edit_cursor < char_count {
-                let byte_pos = app.settings_edit_buffer
+            let char_count = app.settings.edit_buffer.chars().count();
+            if app.settings.edit_cursor < char_count {
+                let byte_pos = app.settings.edit_buffer
                     .char_indices()
-                    .nth(app.settings_edit_cursor)
+                    .nth(app.settings.edit_cursor)
                     .map(|(i, _)| i)
-                    .unwrap_or(app.settings_edit_buffer.len());
-                let next_byte = app.settings_edit_buffer
+                    .unwrap_or(app.settings.edit_buffer.len());
+                let next_byte = app.settings.edit_buffer
                     .char_indices()
-                    .nth(app.settings_edit_cursor + 1)
+                    .nth(app.settings.edit_cursor + 1)
                     .map(|(i, _)| i)
-                    .unwrap_or(app.settings_edit_buffer.len());
-                app.settings_edit_buffer = format!(
+                    .unwrap_or(app.settings.edit_buffer.len());
+                app.settings.edit_buffer = format!(
                     "{}{}",
-                    &app.settings_edit_buffer[..byte_pos],
-                    &app.settings_edit_buffer[next_byte..]
+                    &app.settings.edit_buffer[..byte_pos],
+                    &app.settings.edit_buffer[next_byte..]
                 );
             }
             true
         }
         KeyCode::Left => {
-            app.settings_edit_cursor = app.settings_edit_cursor.saturating_sub(1);
+            app.settings.edit_cursor = app.settings.edit_cursor.saturating_sub(1);
             true
         }
         KeyCode::Right => {
-            let char_count = app.settings_edit_buffer.chars().count();
-            if app.settings_edit_cursor < char_count {
-                app.settings_edit_cursor += 1;
+            let char_count = app.settings.edit_buffer.chars().count();
+            if app.settings.edit_cursor < char_count {
+                app.settings.edit_cursor += 1;
             }
             true
         }
         KeyCode::Home => {
-            app.settings_edit_cursor = 0;
+            app.settings.edit_cursor = 0;
             true
         }
         KeyCode::End => {
-            app.settings_edit_cursor = app.settings_edit_buffer.chars().count();
+            app.settings.edit_cursor = app.settings.edit_buffer.chars().count();
             true
         }
         KeyCode::Char(c) => {
             // 在光标位置插入字符
-            let byte_pos = app.settings_edit_buffer
+            let byte_pos = app.settings.edit_buffer
                 .char_indices()
-                .nth(app.settings_edit_cursor)
+                .nth(app.settings.edit_cursor)
                 .map(|(i, _)| i)
-                .unwrap_or(app.settings_edit_buffer.len());
-            app.settings_edit_buffer.insert(byte_pos, c);
-            app.settings_edit_cursor += 1;
+                .unwrap_or(app.settings.edit_buffer.len());
+            app.settings.edit_buffer.insert(byte_pos, c);
+            app.settings.edit_cursor += 1;
             true
         }
         _ => false,
@@ -190,14 +190,14 @@ pub fn render_settings(f: &mut Frame, app: &App) {
     render_items(f, app, padded);
 
     // Footer
-    let footer_text = if app.settings_editing {
+    let footer_text = if app.settings.editing {
         "输入新值 | Enter 确认 | Esc 取消"
     } else {
         "↑↓ 选择 | Enter/Space 切换/编辑 | Ctrl+S 保存 | Esc 返回"
     };
 
     // 如果有消息，显示在 footer
-    if let Some(msg) = &app.settings_message {
+    if let Some(msg) = &app.settings.message {
         let msg_color = if msg.starts_with('✓') {
             Color::Green
         } else {
@@ -224,7 +224,7 @@ pub fn render_settings(f: &mut Frame, app: &App) {
 
 /// 渲染设置项列表
 fn render_items(f: &mut Frame, app: &App, area: Rect) {
-    if app.settings_items.is_empty() {
+    if app.settings.items.is_empty() {
         let hint = Paragraph::new("正在加载设置...")
             .style(Style::default().fg(Color::DarkGray));
         f.render_widget(hint, area);
@@ -232,7 +232,7 @@ fn render_items(f: &mut Frame, app: &App, area: Rect) {
     }
 
     // 计算 label 最大宽度用于对齐
-    let max_label_width = app.settings_items.iter()
+    let max_label_width = app.settings.items.iter()
         .filter_map(|item| match item {
             SettingsItem::TextEdit { label, .. } => Some(UnicodeWidthStr::width(label.as_str())),
             _ => None,
@@ -244,7 +244,7 @@ fn render_items(f: &mut Frame, app: &App, area: Rect) {
     let mut lines: Vec<Line> = Vec::new();
     let mut focusable_idx = 0;
 
-    for (i, item) in app.settings_items.iter().enumerate() {
+    for (i, item) in app.settings.items.iter().enumerate() {
         match item {
             SettingsItem::Section(title) => {
                 // 分组前空一行（非首项）
@@ -257,7 +257,7 @@ fn render_items(f: &mut Frame, app: &App, area: Rect) {
                 )));
             }
             SettingsItem::Toggle { label, value, .. } => {
-                let is_selected = focusable_idx == app.settings_selected;
+                let is_selected = focusable_idx == app.settings.selected;
                 let checkbox = if *value { "[✓]" } else { "[ ]" };
                 let checkbox_color = if *value { BLUE } else { DIM };
 
@@ -288,8 +288,8 @@ fn render_items(f: &mut Frame, app: &App, area: Rect) {
                 focusable_idx += 1;
             }
             SettingsItem::TextEdit { label, value, masked, .. } => {
-                let is_selected = focusable_idx == app.settings_selected;
-                let is_editing = is_selected && app.settings_editing;
+                let is_selected = focusable_idx == app.settings.selected;
+                let is_editing = is_selected && app.settings.editing;
 
                 let label_width = UnicodeWidthStr::width(label.as_str());
                 let padding = max_label_width.saturating_sub(label_width);
@@ -297,8 +297,8 @@ fn render_items(f: &mut Frame, app: &App, area: Rect) {
 
                 if is_editing {
                     // 编辑中：显示 buffer 和光标
-                    let buf = &app.settings_edit_buffer;
-                    let cursor_pos = app.settings_edit_cursor;
+                    let buf = &app.settings.edit_buffer;
+                    let cursor_pos = app.settings.edit_cursor;
                     let before: String = buf.chars().take(cursor_pos).collect();
                     let cursor_char: String = buf.chars().skip(cursor_pos).take(1).collect();
                     let after: String = buf.chars().skip(cursor_pos + 1).collect();
@@ -349,7 +349,7 @@ fn render_items(f: &mut Frame, app: &App, area: Rect) {
     // 滚动处理
     let total_lines = lines.len();
     let scroll = if total_lines > visible_height {
-        let selected_line = find_selected_line(&app.settings_items, app.settings_selected);
+        let selected_line = find_selected_line(&app.settings.items, app.settings.selected);
         if selected_line >= visible_height {
             selected_line.saturating_sub(visible_height / 2)
         } else {

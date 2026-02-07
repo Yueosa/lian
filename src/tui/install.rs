@@ -1,6 +1,6 @@
 use super::input::InputBox;
 use super::layout;
-use super::state::{App, AppEvent, AppMode, InstallState, ViewMode};
+use super::state::{App, AppEvent, AppMode, InstallPhase, ViewMode};
 use super::theme::{BLUE, BRIGHT_WHITE, DESC_DIM, DIM, PINK, SEL_BG};
 use crate::tui::input::{str_insert_char, str_delete_back, str_delete_forward};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -16,11 +16,11 @@ use tokio::sync::mpsc;
 /// 从 App 状态构建 InputBox 用于渲染
  fn input_box_from_app(app: &App) -> InputBox {
     let mut ib = InputBox::new();
-    for c in app.install_input.chars() {
+    for c in app.install.input.chars() {
         ib.insert(c);
     }
     ib.move_home();
-    for _ in 0..app.install_cursor {
+    for _ in 0..app.install.cursor {
         ib.move_right();
     }
     ib
@@ -33,14 +33,14 @@ pub fn handle_install_key(
     tx: &mpsc::Sender<AppEvent>,
     term_height: u16,
 ) -> bool {
-    match app.install_state {
-        InstallState::Searching => handle_searching_key(key, app, tx),
-        InstallState::PreviewingInstall => handle_preview_key(key, app),
-        InstallState::Installing => handle_output_key(key, app, term_height),
-        InstallState::InstallComplete => handle_output_key(key, app, term_height),
-        InstallState::Analyzing => handle_output_key(key, app, term_height),
-        InstallState::AnalysisComplete => handle_complete_key(key, app, term_height),
-        InstallState::Error => handle_output_key(key, app, term_height),
+    match app.install.phase {
+        InstallPhase::Searching => handle_searching_key(key, app, tx),
+        InstallPhase::PreviewingInstall => handle_preview_key(key, app),
+        InstallPhase::Installing => handle_output_key(key, app, term_height),
+        InstallPhase::InstallComplete => handle_output_key(key, app, term_height),
+        InstallPhase::Analyzing => handle_output_key(key, app, term_height),
+        InstallPhase::AnalysisComplete => handle_complete_key(key, app, term_height),
+        InstallPhase::Error => handle_output_key(key, app, term_height),
     }
 }
 
@@ -57,35 +57,35 @@ fn handle_searching_key(
             true
         }
         KeyCode::Up => {
-            app.install_selected = app.install_selected.saturating_sub(1);
+            app.install.selected = app.install.selected.saturating_sub(1);
             true
         }
         KeyCode::Down => {
-            let max = app.install_results.len().saturating_sub(1);
-            if app.install_selected < max {
-                app.install_selected += 1;
+            let max = app.install.results.len().saturating_sub(1);
+            if app.install.selected < max {
+                app.install.selected += 1;
             }
             true
         }
         KeyCode::Char(' ') => {
             // 多选切换
-            if !app.install_results.is_empty() {
-                if app.install_marked.contains(&app.install_selected) {
-                    app.install_marked.remove(&app.install_selected);
+            if !app.install.results.is_empty() {
+                if app.install.marked.contains(&app.install.selected) {
+                    app.install.marked.remove(&app.install.selected);
                 } else {
-                    app.install_marked.insert(app.install_selected);
+                    app.install.marked.insert(app.install.selected);
                 }
                 // 选中后自动下移
-                let max = app.install_results.len().saturating_sub(1);
-                if app.install_selected < max {
-                    app.install_selected += 1;
+                let max = app.install.results.len().saturating_sub(1);
+                if app.install.selected < max {
+                    app.install.selected += 1;
                 }
             }
             true
         }
         KeyCode::Enter => {
             // 收集选中的包，准备安装
-            if !app.install_results.is_empty() {
+            if !app.install.results.is_empty() {
                 let packages = collect_selected_packages(app);
                 if !packages.is_empty() {
                     // 获取安装预览
@@ -100,50 +100,50 @@ fn handle_searching_key(
                             .unwrap_or_default();
                             let _ = tx_clone.send(AppEvent::InstallPreviewReady(preview)).await;
                         });
-                        app.install_state = InstallState::PreviewingInstall;
-                        app.install_preview = vec!["正在获取安装预览...".to_string()];
-                        app.install_scroll = 0;
+                        app.install.phase = InstallPhase::PreviewingInstall;
+                        app.install.preview = vec!["正在获取安装预览...".to_string()];
+                        app.install.scroll = 0;
                     }
                 }
             }
             true
         }
         KeyCode::Backspace => {
-            str_delete_back(&mut app.install_input, &mut app.install_cursor);
+            str_delete_back(&mut app.install.input, &mut app.install.cursor);
             trigger_search(app, tx);
             true
         }
         KeyCode::Delete => {
-            str_delete_forward(&mut app.install_input, &mut app.install_cursor);
+            str_delete_forward(&mut app.install.input, &mut app.install.cursor);
             trigger_search(app, tx);
             true
         }
         KeyCode::Left => {
-            if app.install_cursor > 0 {
-                app.install_cursor -= 1;
+            if app.install.cursor > 0 {
+                app.install.cursor -= 1;
             }
             true
         }
         KeyCode::Right => {
-            let max = app.install_input.chars().count();
-            if app.install_cursor < max {
-                app.install_cursor += 1;
+            let max = app.install.input.chars().count();
+            if app.install.cursor < max {
+                app.install.cursor += 1;
             }
             true
         }
         KeyCode::Home => {
-            app.install_cursor = 0;
+            app.install.cursor = 0;
             true
         }
         KeyCode::End => {
-            app.install_cursor = app.install_input.chars().count();
+            app.install.cursor = app.install.input.chars().count();
             true
         }
         KeyCode::Char(c) => {
             if key.modifiers.contains(KeyModifiers::CONTROL) {
                 return false;
             }
-            str_insert_char(&mut app.install_input, &mut app.install_cursor, c);
+            str_insert_char(&mut app.install.input, &mut app.install.cursor, c);
             trigger_search(app, tx);
             true
         }
@@ -155,17 +155,17 @@ fn handle_searching_key(
 fn handle_preview_key(key: KeyEvent, app: &mut App) -> bool {
     match key.code {
         KeyCode::Esc => {
-            app.install_state = InstallState::Searching;
-            app.install_preview.clear();
-            app.install_scroll = 0;
+            app.install.phase = InstallPhase::Searching;
+            app.install.preview.clear();
+            app.install.scroll = 0;
             true
         }
         KeyCode::Up => {
-            app.install_scroll = app.install_scroll.saturating_sub(1);
+            app.install.scroll = app.install.scroll.saturating_sub(1);
             true
         }
         KeyCode::Down => {
-            app.install_scroll += 1;
+            app.install.scroll += 1;
             true
         }
         // Enter 在 mod.rs 中处理（需要 sudo）
@@ -177,12 +177,12 @@ fn handle_preview_key(key: KeyEvent, app: &mut App) -> bool {
 fn handle_output_key(key: KeyEvent, app: &mut App, term_height: u16) -> bool {
     match key.code {
         KeyCode::Esc => {
-            match app.install_state {
-                InstallState::Installing | InstallState::Analyzing => {
+            match app.install.phase {
+                InstallPhase::Installing | InstallPhase::Analyzing => {
                     // 进行中：取消并返回搜索
                     crate::package_manager::cancel_update();
-                    app.install_state = InstallState::Searching;
-                    app.install_scroll = 0;
+                    app.install.phase = InstallPhase::Searching;
+                    app.install.scroll = 0;
                 }
                 _ => {
                     // 完成/错误：返回主页
@@ -193,27 +193,27 @@ fn handle_output_key(key: KeyEvent, app: &mut App, term_height: u16) -> bool {
             true
         }
         KeyCode::Up => {
-            app.install_scroll = app.install_scroll.saturating_sub(1);
+            app.install.scroll = app.install.scroll.saturating_sub(1);
             true
         }
         KeyCode::Down => {
-            let content = app.get_install_content();
+            let content = app.install.get_content();
             let visible = layout::visible_content_height(term_height);
             let max_scroll = content.len().saturating_sub(visible);
-            if app.install_scroll < max_scroll {
-                app.install_scroll += 1;
+            if app.install.scroll < max_scroll {
+                app.install.scroll += 1;
             }
             true
         }
         KeyCode::PageUp => {
-            app.install_scroll = app.install_scroll.saturating_sub(10);
+            app.install.scroll = app.install.scroll.saturating_sub(10);
             true
         }
         KeyCode::PageDown => {
-            let content = app.get_install_content();
+            let content = app.install.get_content();
             let visible = layout::visible_content_height(term_height);
             let max_scroll = content.len().saturating_sub(visible);
-            app.install_scroll = (app.install_scroll + 10).min(max_scroll);
+            app.install.scroll = (app.install.scroll + 10).min(max_scroll);
             true
         }
         _ => false,
@@ -224,11 +224,11 @@ fn handle_output_key(key: KeyEvent, app: &mut App, term_height: u16) -> bool {
 fn handle_complete_key(key: KeyEvent, app: &mut App, term_height: u16) -> bool {
     match key.code {
         KeyCode::Tab => {
-            app.install_view_mode = match app.install_view_mode {
+            app.install.view_mode = match app.install.view_mode {
                 ViewMode::UpdateLog => ViewMode::AIAnalysis,
                 ViewMode::AIAnalysis => ViewMode::UpdateLog,
             };
-            app.install_scroll = 0;
+            app.install.scroll = 0;
             true
         }
         _ => handle_output_key(key, app, term_height),
@@ -237,17 +237,17 @@ fn handle_complete_key(key: KeyEvent, app: &mut App, term_height: u16) -> bool {
 
 /// 触发异步搜索
 fn trigger_search(app: &mut App, tx: &mpsc::Sender<AppEvent>) {
-    let keyword = app.install_input.clone();
+    let keyword = app.install.input.clone();
     if keyword.trim().is_empty() {
-        app.install_results.clear();
-        app.install_selected = 0;
-        app.install_marked.clear();
-        app.install_searching = false;
+        app.install.results.clear();
+        app.install.selected = 0;
+        app.install.marked.clear();
+        app.install.searching = false;
         return;
     }
 
     if let Some(pm) = app.package_manager.clone() {
-        app.install_searching = true;
+        app.install.searching = true;
         let tx_clone = tx.clone();
         tokio::spawn(async move {
             let results = tokio::task::spawn_blocking(move || pm.search_remote(&keyword))
@@ -260,16 +260,16 @@ fn trigger_search(app: &mut App, tx: &mpsc::Sender<AppEvent>) {
 
 /// 收集选中的包名列表
 fn collect_selected_packages(app: &App) -> Vec<String> {
-    if app.install_marked.is_empty() {
-        if let Some(pkg) = app.install_results.get(app.install_selected) {
+    if app.install.marked.is_empty() {
+        if let Some(pkg) = app.install.results.get(app.install.selected) {
             vec![pkg.name.clone()]
         } else {
             Vec::new()
         }
     } else {
-        app.install_marked
+        app.install.marked
             .iter()
-            .filter_map(|&idx| app.install_results.get(idx))
+            .filter_map(|&idx| app.install.results.get(idx))
             .map(|pkg| pkg.name.clone())
             .collect()
     }
@@ -288,13 +288,13 @@ pub fn spawn_install_task(app: &mut App, tx: &mpsc::Sender<AppEvent>) {
     }
 
     let tx_clone = tx.clone();
-    app.install_state = InstallState::Installing;
-    app.install_lines.clear();
-    app.install_lines.push(format!(
+    app.install.phase = InstallPhase::Installing;
+    app.install.lines.clear();
+    app.install.lines.push(format!(
         "正在安装: {} ...",
         packages.join(", ")
     ));
-    app.install_scroll = 0;
+    app.install.scroll = 0;
 
     std::thread::spawn(move || {
         let (output_tx, mut output_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -325,9 +325,9 @@ pub fn handle_install_complete(
     tx: &mpsc::Sender<AppEvent>,
     api_key: &str,
 ) {
-    if let Some(output) = &app.install_output {
+    if let Some(output) = &app.install.output {
         if output.success && app.config.ai_enabled_for("install") {
-            app.install_state = InstallState::Analyzing;
+            app.install.phase = InstallPhase::Analyzing;
 
             let pm_name = app.package_manager.as_ref().unwrap().name().to_string();
             let install_log = output.combined_output();
@@ -369,7 +369,7 @@ pub fn handle_install_complete(
         } else if output.success && !app.config.ai_enabled_for("install") {
             let mut new_output = output.clone();
             new_output.stdout.push_str("\n\n[AI 分析已关闭，可在设置中开启]");
-            app.install_output = Some(new_output);
+            app.install.output = Some(new_output);
         }
     }
 }
@@ -380,10 +380,10 @@ pub fn handle_install_analysis_complete(
     analysis: String,
     tx: &mpsc::Sender<AppEvent>,
 ) {
-    app.install_analysis = Some(analysis.clone());
-    app.install_state = InstallState::AnalysisComplete;
-    app.install_view_mode = ViewMode::AIAnalysis;
-    app.install_scroll = 0;
+    app.install.analysis = Some(analysis.clone());
+    app.install.phase = InstallPhase::AnalysisComplete;
+    app.install.view_mode = ViewMode::AIAnalysis;
+    app.install.scroll = 0;
 
     let report_dir = app.config.report_dir.clone();
     let distro_name = app.system_info.as_ref()
@@ -409,9 +409,9 @@ pub fn handle_install_analysis_complete(
 
 /// 渲染安装视图
 pub fn render_install(f: &mut Frame, app: &App) {
-    match app.install_state {
-        InstallState::Searching => render_search_view(f, app),
-        InstallState::PreviewingInstall => render_preview_view(f, app),
+    match app.install.phase {
+        InstallPhase::Searching => render_search_view(f, app),
+        InstallPhase::PreviewingInstall => render_preview_view(f, app),
         _ => render_output_view(f, app),
     }
 }
@@ -451,7 +451,7 @@ fn render_search_view(f: &mut Frame, app: &App) {
 
     // 搜索框
     let ib = input_box_from_app(app);
-    let search_text = if app.install_searching {
+    let search_text = if app.install.searching {
         format!("> 搜索: {}_ (搜索中...)", ib.content())
     } else {
         format!("> 搜索: {}_", ib.content())
@@ -464,9 +464,9 @@ fn render_search_view(f: &mut Frame, app: &App) {
     render_result_list(f, app, inner_chunks[2]);
 
     // Footer
-    let footer = if app.install_results.is_empty() {
+    let footer = if app.install.results.is_empty() {
         "输入关键词搜索远程仓库包 | Esc 返回"
-    } else if app.install_marked.is_empty() {
+    } else if app.install.marked.is_empty() {
         "↑↓ 选择 | Space 多选 | Enter 安装选中 | Esc 返回"
     } else {
         "↑↓ 选择 | Space 多选/取消 | Enter 安装标记项 | Esc 返回"
@@ -476,8 +476,8 @@ fn render_search_view(f: &mut Frame, app: &App) {
 
 /// 渲染搜索结果列表
 fn render_result_list(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
-    if app.install_results.is_empty() {
-        if !app.install_input.is_empty() && !app.install_searching {
+    if app.install.results.is_empty() {
+        if !app.install.input.is_empty() && !app.install.searching {
             let hint = Paragraph::new("  未找到匹配的包")
                 .style(Style::default().fg(Color::DarkGray));
             f.render_widget(hint, area);
@@ -486,23 +486,23 @@ fn render_result_list(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     }
 
     let visible_height = area.height as usize;
-    let total = app.install_results.len();
+    let total = app.install.results.len();
 
     // 确保选中项在可见范围内
-    let scroll = if app.install_selected >= visible_height {
-        app.install_selected.saturating_sub(visible_height - 1)
+    let scroll = if app.install.selected >= visible_height {
+        app.install.selected.saturating_sub(visible_height - 1)
     } else {
         0
     };
 
-    let lines: Vec<Line> = app.install_results
+    let lines: Vec<Line> = app.install.results
         .iter()
         .enumerate()
         .skip(scroll)
         .take(visible_height)
         .map(|(idx, pkg)| {
-            let is_selected = idx == app.install_selected;
-            let is_marked = app.install_marked.contains(&idx);
+            let is_selected = idx == app.install.selected;
+            let is_marked = app.install.marked.contains(&idx);
 
             let marker = if is_marked { "[✓] " } else { "    " };
             let cursor = if is_selected { ">" } else { " " };
@@ -585,13 +585,13 @@ fn render_preview_view(f: &mut Frame, app: &App) {
     layout::render_scrollable_content(
         f,
         "将安装以下软件包",
-        &app.install_preview,
-        app.install_scroll,
+        &app.install.preview,
+        app.install.scroll,
         chunks[1],
     );
 
-    let footer = if app.install_preview.len() == 1
-        && app.install_preview[0].contains("正在获取")
+    let footer = if app.install.preview.len() == 1
+        && app.install.preview[0].contains("正在获取")
     {
         "正在获取安装预览..."
     } else {
@@ -605,12 +605,12 @@ fn render_output_view(f: &mut Frame, app: &App) {
     let chunks = layout::main_layout(f.area());
 
     // Header
-    let title = match app.install_state {
-        InstallState::Installing => "⚙️  正在安装...",
-        InstallState::InstallComplete => "✅ 安装完成",
-        InstallState::Analyzing => "🤖 AI 分析中...",
-        InstallState::AnalysisComplete => "✨ 分析完成",
-        InstallState::Error => "❌ 错误",
+    let title = match app.install.phase {
+        InstallPhase::Installing => "⚙️  正在安装...",
+        InstallPhase::InstallComplete => "✅ 安装完成",
+        InstallPhase::Analyzing => "🤖 AI 分析中...",
+        InstallPhase::AnalysisComplete => "✨ 分析完成",
+        InstallPhase::Error => "❌ 错误",
         _ => "📦 安装",
     };
 
@@ -631,8 +631,8 @@ fn render_output_view(f: &mut Frame, app: &App) {
     f.render_widget(header, chunks[0]);
 
     // Content
-    let content_title = if app.install_state == InstallState::AnalysisComplete {
-        match app.install_view_mode {
+    let content_title = if app.install.phase == InstallPhase::AnalysisComplete {
+        match app.install.view_mode {
             ViewMode::UpdateLog => "安装日志 [Tab 切换到 AI 分析]",
             ViewMode::AIAnalysis => "AI 分析报告 [Tab 切换到安装日志]",
         }
@@ -640,31 +640,31 @@ fn render_output_view(f: &mut Frame, app: &App) {
         "安装日志"
     };
 
-    let content = app.get_install_content();
-    layout::render_scrollable_content(f, content_title, &content, app.install_scroll, chunks[1]);
+    let content = app.install.get_content();
+    layout::render_scrollable_content(f, content_title, &content, app.install.scroll, chunks[1]);
 
     // Footer
     let owned_text: String;
-    let footer_text = match app.install_state {
-        InstallState::Installing => {
-            if app.install_progress.is_empty() {
+    let footer_text = match app.install.phase {
+        InstallPhase::Installing => {
+            if app.install.progress.is_empty() {
                 "安装进行中..."
             } else {
-                owned_text = format!("安装进行中 | {}", app.install_progress);
+                owned_text = format!("安装进行中 | {}", app.install.progress);
                 &owned_text
             }
         }
-        InstallState::InstallComplete => "安装完成 | ↑↓ 滚动 | Esc 返回主页",
-        InstallState::Analyzing => "AI 正在分析安装内容...",
-        InstallState::AnalysisComplete => {
-            if let Some(path) = &app.install_saved_report {
+        InstallPhase::InstallComplete => "安装完成 | ↑↓ 滚动 | Esc 返回主页",
+        InstallPhase::Analyzing => "AI 正在分析安装内容...",
+        InstallPhase::AnalysisComplete => {
+            if let Some(path) = &app.install.report_path {
                 owned_text = format!("报告已保存: {} | Tab 切换视图 | Esc 返回主页", path);
                 &owned_text
             } else {
                 "Tab 切换视图 | ↑↓ 滚动 | Esc 返回主页"
             }
         }
-        InstallState::Error => {
+        InstallPhase::Error => {
             if let Some(msg) = &app.error_message {
                 msg
             } else {

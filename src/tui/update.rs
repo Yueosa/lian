@@ -1,5 +1,5 @@
 use super::layout;
-use super::state::{App, AppEvent, AppState, ViewMode};
+use super::state::{App, AppEvent, UpdatePhase, ViewMode};
 use crate::deepseek::AiClient;
 use crate::prompt;
 use crate::report::ReportSaver;
@@ -19,33 +19,33 @@ pub fn handle_update_key(
 ) -> bool {
     match key.code {
         KeyCode::Tab => {
-            if app.state == AppState::AnalysisComplete {
-                app.view_mode = match app.view_mode {
+            if app.update.phase == UpdatePhase::AnalysisComplete {
+                app.update.view_mode = match app.update.view_mode {
                     ViewMode::UpdateLog => ViewMode::AIAnalysis,
                     ViewMode::AIAnalysis => ViewMode::UpdateLog,
                 };
-                app.reset_scroll();
+                app.update.reset_scroll();
             }
             true
         }
         KeyCode::Up => {
-            app.scroll_up();
+            app.update.scroll_up();
             true
         }
         KeyCode::Down => {
-            let content = app.get_current_content();
+            let content = app.update.get_content();
             let visible = layout::visible_content_height(term_height);
-            app.scroll_down(content.len(), visible);
+            app.update.scroll_down(content.len(), visible);
             true
         }
         KeyCode::PageUp => {
-            app.scroll_page_up(10);
+            app.update.scroll_page_up(10);
             true
         }
         KeyCode::PageDown => {
-            let content = app.get_current_content();
+            let content = app.update.get_content();
             let visible = layout::visible_content_height(term_height);
-            app.scroll_page_down(10, content.len(), visible);
+            app.update.scroll_page_down(10, content.len(), visible);
             true
         }
         _ => false,
@@ -59,9 +59,9 @@ pub fn spawn_update_task(app: &mut App, tx: &mpsc::Sender<AppEvent>) {
         None => return,
     };
     let tx_clone = tx.clone();
-    app.state = AppState::Updating;
-    app.update_lines.clear();
-    app.update_lines.push("正在执行更新...".to_string());
+    app.update.phase = UpdatePhase::Updating;
+    app.update.lines.clear();
+    app.update.lines.push("正在执行更新...".to_string());
 
     std::thread::spawn(move || {
         let packages_before = pm.get_explicit_packages().ok();
@@ -100,14 +100,14 @@ pub fn handle_update_complete(
     tx: &mpsc::Sender<AppEvent>,
     api_key: &str,
 ) {
-    if let Some(output) = &app.update_output {
+    if let Some(output) = &app.update.output {
         if output.success && app.config.ai_enabled_for("update") {
-            app.state = AppState::Analyzing;
+            app.update.phase = UpdatePhase::Analyzing;
 
             let pm_name = app.package_manager.as_ref().unwrap().name().to_string();
             let update_log = output.combined_output();
-            let pkg_before = app.packages_before.as_deref();
-            let pkg_after = app.packages_after.as_deref();
+            let pkg_before = app.update.packages_before.as_deref();
+            let pkg_after = app.update.packages_after.as_deref();
             let sys_info = app.system_info.clone();
 
             let prompt_text = prompt::generate_analysis_prompt(
@@ -144,11 +144,11 @@ pub fn handle_update_complete(
         }
     }
     // 如果 AI 未启用但更新成功，追加提示到输出
-    if let Some(ref output) = app.update_output {
+    if let Some(ref output) = app.update.output {
         if output.success && !app.config.ai_enabled_for("update") {
             let mut new_output = output.clone();
             new_output.stdout.push_str("\n\n[AI 分析已关闭，可在设置中开启]");
-            app.update_output = Some(new_output);
+            app.update.output = Some(new_output);
         }
     }
 }
@@ -159,10 +159,10 @@ pub fn handle_analysis_complete(
     analysis: String,
     tx: &mpsc::Sender<AppEvent>,
 ) {
-    app.analysis_result = Some(analysis.clone());
-    app.state = AppState::AnalysisComplete;
-    app.view_mode = ViewMode::AIAnalysis;
-    app.reset_scroll();
+    app.update.analysis = Some(analysis.clone());
+    app.update.phase = UpdatePhase::AnalysisComplete;
+    app.update.view_mode = ViewMode::AIAnalysis;
+    app.update.reset_scroll();
 
     let report_dir = app.config.report_dir.clone();
     let distro_name = app.system_info.as_ref()
@@ -194,14 +194,14 @@ pub fn render_update(f: &mut Frame, app: &App) {
 }
 
 fn render_update_header(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
-    let title = match app.state {
-        AppState::PackageManagerCheck => "🔍 检测包管理器...",
-        AppState::PreviewingUpdates => "📝 可用更新列表",
-        AppState::Updating => "⚙️  正在更新系统...",
-        AppState::UpdateComplete => "✅ 更新完成",
-        AppState::Analyzing => "🤖 AI 分析中...",
-        AppState::AnalysisComplete => "✨ 分析完成",
-        AppState::Error => "❌ 错误",
+    let title = match app.update.phase {
+        UpdatePhase::PackageManagerCheck => "🔍 检测包管理器...",
+        UpdatePhase::PreviewingUpdates => "📝 可用更新列表",
+        UpdatePhase::Updating => "⚙️  正在更新系统...",
+        UpdatePhase::UpdateComplete => "✅ 更新完成",
+        UpdatePhase::Analyzing => "🤖 AI 分析中...",
+        UpdatePhase::AnalysisComplete => "✨ 分析完成",
+        UpdatePhase::Error => "❌ 错误",
     };
 
     let pm_info = if let Some(pm) = &app.package_manager {
@@ -223,38 +223,38 @@ fn render_update_header(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 }
 
 fn render_update_content(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
-    let title = match app.view_mode {
+    let title = match app.update.view_mode {
         ViewMode::UpdateLog => "更新日志 [Tab 切换到 AI 分析]",
         ViewMode::AIAnalysis => "AI 分析报告 [Tab 切换到更新日志]",
     };
 
-    let content = app.get_current_content();
-    layout::render_scrollable_content(f, title, &content, app.scroll_offset, area);
+    let content = app.update.get_content();
+    layout::render_scrollable_content(f, title, &content, app.update.scroll, area);
 }
 
 fn render_update_footer(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let owned_text: String;
-    let footer_text = match app.state {
-        AppState::PackageManagerCheck => "正在检测包管理器...",
-        AppState::PreviewingUpdates => {
-            if app.update_preview.is_empty() {
+    let footer_text = match app.update.phase {
+        UpdatePhase::PackageManagerCheck => "正在检测包管理器...",
+        UpdatePhase::PreviewingUpdates => {
+            if app.update.preview.is_empty() {
                 "Esc 返回 | q 退出"
             } else {
                 "按 Enter 开始更新 | Esc 返回 | ↑↓ 滚动"
             }
         }
-        AppState::Updating => {
-            if app.update_progress.is_empty() {
+        UpdatePhase::Updating => {
+            if app.update.progress.is_empty() {
                 "更新进行中..."
             } else {
-                owned_text = format!("更新进行中 | {}", app.update_progress);
+                owned_text = format!("更新进行中 | {}", app.update.progress);
                 &owned_text
             }
         }
-        AppState::UpdateComplete => "更新完成 | ↑↓ 滚动 | Esc 返回主页",
-        AppState::Analyzing => "AI 正在分析更新内容...",
-        AppState::AnalysisComplete => {
-            if let Some(path) = &app.saved_report_path {
+        UpdatePhase::UpdateComplete => "更新完成 | ↑↓ 滚动 | Esc 返回主页",
+        UpdatePhase::Analyzing => "AI 正在分析更新内容...",
+        UpdatePhase::AnalysisComplete => {
+            if let Some(path) = &app.update.report_path {
                 owned_text = format!(
                     "报告已保存: {} | Tab 切换视图 | ↑↓ 滚动 | Esc 返回主页 | q 退出",
                     path
@@ -264,7 +264,7 @@ fn render_update_footer(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                 "Tab 切换视图 | ↑↓ 滚动 | Esc 返回主页 | q 退出"
             }
         }
-        AppState::Error => {
+        UpdatePhase::Error => {
             if let Some(msg) = &app.error_message {
                 msg
             } else {

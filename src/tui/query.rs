@@ -17,11 +17,11 @@ use unicode_width::UnicodeWidthStr;
 /// 从 App 状态构建 InputBox 用于渲染
 fn input_box_from_app(app: &App) -> InputBox {
     let mut ib = InputBox::new();
-    for c in app.query_input.chars() {
+    for c in app.query.input.chars() {
         ib.insert(c);
     }
     ib.move_home();
-    for _ in 0..app.query_cursor {
+    for _ in 0..app.query.cursor {
         ib.move_right();
     }
     ib
@@ -29,14 +29,14 @@ fn input_box_from_app(app: &App) -> InputBox {
 
 /// 计算详情视图总行数（用于滚动边界）
 pub fn detail_total_lines(app: &App) -> usize {
-    let field_count = app.query_detail.as_ref().map(|d| d.fields.len()).unwrap_or(0);
-    let list_items = match app.query_file_mode {
-        FileListMode::Files => &app.query_files,
-        FileListMode::Directories => &app.query_dirs,
+    let field_count = app.query.detail.as_ref().map(|d| d.fields.len()).unwrap_or(0);
+    let list_items = match app.query.file_mode {
+        FileListMode::Files => &app.query.files,
+        FileListMode::Directories => &app.query.dirs,
     };
     let file_lines = if !list_items.is_empty() {
         2 + list_items.len()
-    } else if app.query_detail.is_some() {
+    } else if app.query.detail.is_some() {
         2
     } else {
         0
@@ -51,7 +51,7 @@ pub fn handle_query_key(
     tx: &mpsc::Sender<AppEvent>,
     term_height: u16,
 ) {
-    match app.query_view {
+    match app.query.view {
         QueryView::List => handle_list_key(key, app, tx),
         QueryView::Detail => handle_detail_key(key, app, term_height),
     }
@@ -71,43 +71,43 @@ fn handle_list_key(
         }
         // Tab 切换面板
         KeyCode::Tab => {
-            app.query_panel = match app.query_panel {
+            app.query.panel = match app.query.panel {
                 QueryPanel::Local => QueryPanel::Remote,
                 QueryPanel::Remote => QueryPanel::Local,
             };
         }
         // 上下选择
         KeyCode::Up => {
-            match app.query_panel {
+            match app.query.panel {
                 QueryPanel::Local => {
-                    app.query_local_selected = app.query_local_selected.saturating_sub(1);
+                    app.query.local_selected = app.query.local_selected.saturating_sub(1);
                 }
                 QueryPanel::Remote => {
-                    app.query_remote_selected = app.query_remote_selected.saturating_sub(1);
+                    app.query.remote_selected = app.query.remote_selected.saturating_sub(1);
                 }
             }
         }
         KeyCode::Down => {
-            match app.query_panel {
+            match app.query.panel {
                 QueryPanel::Local => {
-                    let max = app.query_local_results.len().saturating_sub(1);
-                    if app.query_local_selected < max {
-                        app.query_local_selected += 1;
+                    let max = app.query.local_results.len().saturating_sub(1);
+                    if app.query.local_selected < max {
+                        app.query.local_selected += 1;
                     }
                 }
                 QueryPanel::Remote => {
-                    let max = app.query_remote_results.len().saturating_sub(1);
-                    if app.query_remote_selected < max {
-                        app.query_remote_selected += 1;
+                    let max = app.query.remote_results.len().saturating_sub(1);
+                    if app.query.remote_selected < max {
+                        app.query.remote_selected += 1;
                     }
                 }
             }
         }
         // Enter 查看详情
         KeyCode::Enter => {
-            let selected_pkg = match app.query_panel {
-                QueryPanel::Local => app.query_local_results.get(app.query_local_selected).cloned(),
-                QueryPanel::Remote => app.query_remote_results.get(app.query_remote_selected).cloned(),
+            let selected_pkg = match app.query.panel {
+                QueryPanel::Local => app.query.local_results.get(app.query.local_selected).cloned(),
+                QueryPanel::Remote => app.query.remote_results.get(app.query.remote_selected).cloned(),
             };
             if let Some(pkg) = selected_pkg {
                 load_package_detail(app, &pkg, tx);
@@ -121,33 +121,33 @@ fn handle_list_key(
             {
                 return;
             }
-            str_insert_char(&mut app.query_input, &mut app.query_cursor, c);
+            str_insert_char(&mut app.query.input, &mut app.query.cursor, c);
             trigger_search(app, tx);
         }
         KeyCode::Backspace => {
-            str_delete_back(&mut app.query_input, &mut app.query_cursor);
+            str_delete_back(&mut app.query.input, &mut app.query.cursor);
             trigger_search(app, tx);
         }
         KeyCode::Delete => {
-            str_delete_forward(&mut app.query_input, &mut app.query_cursor);
+            str_delete_forward(&mut app.query.input, &mut app.query.cursor);
             trigger_search(app, tx);
         }
         KeyCode::Left => {
-            if app.query_cursor > 0 {
-                app.query_cursor -= 1;
+            if app.query.cursor > 0 {
+                app.query.cursor -= 1;
             }
         }
         KeyCode::Right => {
-            let char_count = app.query_input.chars().count();
-            if app.query_cursor < char_count {
-                app.query_cursor += 1;
+            let char_count = app.query.input.chars().count();
+            if app.query.cursor < char_count {
+                app.query.cursor += 1;
             }
         }
         KeyCode::Home => {
-            app.query_cursor = 0;
+            app.query.cursor = 0;
         }
         KeyCode::End => {
-            app.query_cursor = app.query_input.chars().count();
+            app.query.cursor = app.query.input.chars().count();
         }
         _ => {}
     }
@@ -155,17 +155,17 @@ fn handle_list_key(
 
 /// 触发异步搜索
 fn trigger_search(app: &mut App, tx: &mpsc::Sender<AppEvent>) {
-    let keyword = app.query_input.clone();
+    let keyword = app.query.input.clone();
     if keyword.trim().is_empty() {
-        app.query_local_results.clear();
-        app.query_remote_results.clear();
-        app.query_local_selected = 0;
-        app.query_remote_selected = 0;
-        app.query_searching = false;
+        app.query.local_results.clear();
+        app.query.remote_results.clear();
+        app.query.local_selected = 0;
+        app.query.remote_selected = 0;
+        app.query.searching = false;
         return;
     }
 
-    app.query_searching = true;
+    app.query.searching = true;
 
     let pm = match app.package_manager.clone() {
         Some(pm) => pm,
@@ -266,34 +266,34 @@ fn handle_detail_key(key: KeyEvent, app: &mut App, term_height: u16) {
 
     match key.code {
         KeyCode::Esc => {
-            app.query_view = QueryView::List;
-            app.query_detail = None;
-            app.query_files.clear();
-            app.query_dirs.clear();
-            app.query_file_mode = FileListMode::Files;
-            app.query_detail_scroll = 0;
+            app.query.view = QueryView::List;
+            app.query.detail = None;
+            app.query.files.clear();
+            app.query.dirs.clear();
+            app.query.file_mode = FileListMode::Files;
+            app.query.detail_scroll = 0;
         }
         KeyCode::Tab => {
             // 切换文件/目录视图
-            app.query_file_mode = match app.query_file_mode {
+            app.query.file_mode = match app.query.file_mode {
                 FileListMode::Files => FileListMode::Directories,
                 FileListMode::Directories => FileListMode::Files,
             };
-            app.query_detail_scroll = 0;
+            app.query.detail_scroll = 0;
         }
         KeyCode::Up => {
-            app.query_detail_scroll = app.query_detail_scroll.saturating_sub(1);
+            app.query.detail_scroll = app.query.detail_scroll.saturating_sub(1);
         }
         KeyCode::Down => {
-            if app.query_detail_scroll < max_scroll {
-                app.query_detail_scroll += 1;
+            if app.query.detail_scroll < max_scroll {
+                app.query.detail_scroll += 1;
             }
         }
         KeyCode::PageUp => {
-            app.query_detail_scroll = app.query_detail_scroll.saturating_sub(10);
+            app.query.detail_scroll = app.query.detail_scroll.saturating_sub(10);
         }
         KeyCode::PageDown => {
-            app.query_detail_scroll = (app.query_detail_scroll + 10).min(max_scroll);
+            app.query.detail_scroll = (app.query.detail_scroll + 10).min(max_scroll);
         }
         _ => {}
     }
@@ -303,7 +303,7 @@ fn handle_detail_key(key: KeyEvent, app: &mut App, term_height: u16) {
 
 /// 渲染查询视图
 pub fn render_query(f: &mut Frame, app: &App) {
-    match app.query_view {
+    match app.query.view {
         QueryView::List => render_list_view(f, app),
         QueryView::Detail => render_detail_view(f, app),
     }
@@ -339,9 +339,9 @@ fn render_list_view(f: &mut Frame, app: &App) {
     render_result_panel(
         f,
         "本地已安装 (Qs)",
-        &app.query_local_results,
-        app.query_local_selected,
-        app.query_panel == QueryPanel::Local,
+        &app.query.local_results,
+        app.query.local_selected,
+        app.query.panel == QueryPanel::Local,
         panels[0],
     );
 
@@ -349,14 +349,14 @@ fn render_list_view(f: &mut Frame, app: &App) {
     render_result_panel(
         f,
         "远程仓库 (Ss)",
-        &app.query_remote_results,
-        app.query_remote_selected,
-        app.query_panel == QueryPanel::Remote,
+        &app.query.remote_results,
+        app.query.remote_selected,
+        app.query.panel == QueryPanel::Remote,
         panels[1],
     );
 
     // Footer
-    let footer_text = if app.query_searching {
+    let footer_text = if app.query.searching {
         "搜索中... | Tab 切换面板 | ↑↓ 选择 | Enter 查看详情 | Esc 返回"
     } else {
         "输入关键词搜索 | Tab 切换面板 | ↑↓ 选择 | Enter 查看详情 | Esc 返回"
@@ -497,10 +497,10 @@ fn render_detail_view(f: &mut Frame, app: &App) {
     render_detail_content(f, app, chunks[1]);
 
     // Footer
-    let footer_text = if app.query_files.is_empty() && app.query_dirs.is_empty() {
+    let footer_text = if app.query.files.is_empty() && app.query.dirs.is_empty() {
         "↑↓ 滚动 | PgUp/PgDn 翻页 | Esc 返回列表"
     } else {
-        match app.query_file_mode {
+        match app.query.file_mode {
             FileListMode::Files => "↑↓ 滚动 | PgUp/PgDn 翻页 | Tab 切换目录视图 | Esc 返回列表",
             FileListMode::Directories => "↑↓ 滚动 | PgUp/PgDn 翻页 | Tab 切换文件视图 | Esc 返回列表",
         }
@@ -525,7 +525,7 @@ fn render_detail_content(f: &mut Frame, app: &App, area: Rect) {
     let mut all_lines: Vec<Line> = Vec::new();
 
     // 包信息字段（CJK 对齐）
-    if let Some(detail) = &app.query_detail {
+    if let Some(detail) = &app.query.detail {
         for (key, value) in &detail.fields {
             let key_width = UnicodeWidthStr::width(key.as_str());
             let target_width: usize = 18;
@@ -544,14 +544,14 @@ fn render_detail_content(f: &mut Frame, app: &App, area: Rect) {
     }
 
     // 文件/目录列表
-    let (list_items, list_title, empty_msg) = match app.query_file_mode {
+    let (list_items, list_title, empty_msg) = match app.query.file_mode {
         FileListMode::Files => (
-            &app.query_files,
+            &app.query.files,
             "──── 文件列表 ────",
             "  (远程包，无文件列表)",
         ),
         FileListMode::Directories => (
-            &app.query_dirs,
+            &app.query.dirs,
             "──── 目录列表 ────",
             "  (远程包，无目录列表)",
         ),
@@ -571,7 +571,7 @@ fn render_detail_content(f: &mut Frame, app: &App, area: Rect) {
                 Style::default().fg(Color::White),
             )));
         }
-    } else if app.query_detail.is_some() {
+    } else if app.query.detail.is_some() {
         all_lines.push(Line::from(""));
         all_lines.push(Line::from(Span::styled(
             empty_msg,
@@ -582,7 +582,7 @@ fn render_detail_content(f: &mut Frame, app: &App, area: Rect) {
     let total_lines = all_lines.len();
     let visible_height = padded.height as usize;
     let max_scroll = total_lines.saturating_sub(visible_height);
-    let actual_scroll = app.query_detail_scroll.min(max_scroll);
+    let actual_scroll = app.query.detail_scroll.min(max_scroll);
 
     let visible: Vec<Line> = all_lines
         .into_iter()

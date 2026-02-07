@@ -19,7 +19,7 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{backend::CrosstermBackend, Frame, Terminal};
-use state::{App, AppEvent, AppMode, AppState};
+use state::{App, AppEvent, AppMode, UpdatePhase};
 use std::io;
 use tokio::sync::mpsc;
 
@@ -63,61 +63,61 @@ pub async fn run(api_key: String, config: Config) -> Result<()> {
     loop {
         // 更新模式下 clamp scroll
         if app.mode == AppMode::Update {
-            let content = app.get_current_content();
+            let content = app.update.get_content();
             let term_size = terminal.size()?;
             let visible_height = layout::visible_content_height(term_size.height);
-            app.clamp_scroll(content.len(), visible_height);
+            app.update.clamp_scroll(content.len(), visible_height);
         }
         // 查询详情视图 clamp scroll
-        if app.mode == AppMode::Query && app.query_view == state::QueryView::Detail {
+        if app.mode == AppMode::Query && app.query.view == state::QueryView::Detail {
             let term_size = terminal.size()?;
             let total = query::detail_total_lines(&app);
             let visible = term_size.height.saturating_sub(8) as usize;
             let max_scroll = total.saturating_sub(visible);
-            app.query_detail_scroll = app.query_detail_scroll.min(max_scroll);
+            app.query.detail_scroll = app.query.detail_scroll.min(max_scroll);
         }
         // 安装模式 clamp scroll（输出阶段）
         if app.mode == AppMode::Install {
-            match app.install_state {
-                state::InstallState::Installing
-                | state::InstallState::InstallComplete
-                | state::InstallState::Analyzing
-                | state::InstallState::AnalysisComplete
-                | state::InstallState::Error => {
-                    let content = app.get_install_content();
+            match app.install.phase {
+                state::InstallPhase::Installing
+                | state::InstallPhase::InstallComplete
+                | state::InstallPhase::Analyzing
+                | state::InstallPhase::AnalysisComplete
+                | state::InstallPhase::Error => {
+                    let content = app.install.get_content();
                     let term_size = terminal.size()?;
                     let visible = layout::visible_content_height(term_size.height);
                     let max_scroll = content.len().saturating_sub(visible);
-                    app.install_scroll = app.install_scroll.min(max_scroll);
+                    app.install.scroll = app.install.scroll.min(max_scroll);
                 }
-                state::InstallState::PreviewingInstall => {
+                state::InstallPhase::PreviewingInstall => {
                     let term_size = terminal.size()?;
                     let visible = layout::visible_content_height(term_size.height);
-                    let max_scroll = app.install_preview.len().saturating_sub(visible);
-                    app.install_scroll = app.install_scroll.min(max_scroll);
+                    let max_scroll = app.install.preview.len().saturating_sub(visible);
+                    app.install.scroll = app.install.scroll.min(max_scroll);
                 }
                 _ => {}
             }
         }
         // 卸载模式 clamp scroll（输出阶段）
         if app.mode == AppMode::Remove {
-            match app.remove_state {
-                state::RemoveState::Removing
-                | state::RemoveState::RemoveComplete
-                | state::RemoveState::Analyzing
-                | state::RemoveState::AnalysisComplete
-                | state::RemoveState::Error => {
-                    let content = app.get_remove_content();
+            match app.remove.phase {
+                state::RemovePhase::Removing
+                | state::RemovePhase::RemoveComplete
+                | state::RemovePhase::Analyzing
+                | state::RemovePhase::AnalysisComplete
+                | state::RemovePhase::Error => {
+                    let content = app.remove.get_content();
                     let term_size = terminal.size()?;
                     let visible = layout::visible_content_height(term_size.height);
                     let max_scroll = content.len().saturating_sub(visible);
-                    app.remove_scroll = app.remove_scroll.min(max_scroll);
+                    app.remove.scroll = app.remove.scroll.min(max_scroll);
                 }
-                state::RemoveState::PreviewingRemove => {
+                state::RemovePhase::PreviewingRemove => {
                     let term_size = terminal.size()?;
                     let visible = layout::visible_content_height(term_size.height);
-                    let max_scroll = app.remove_preview.len().saturating_sub(visible);
-                    app.remove_scroll = app.remove_scroll.min(max_scroll);
+                    let max_scroll = app.remove.preview.len().saturating_sub(visible);
+                    app.remove.scroll = app.remove.scroll.min(max_scroll);
                 }
                 _ => {}
             }
@@ -151,7 +151,7 @@ pub async fn run(api_key: String, config: Config) -> Result<()> {
                             AppMode::Update => {
                                 crate::package_manager::cancel_update();
                                 app.mode = AppMode::Dashboard;
-                                app.reset_scroll();
+                                app.update.reset_scroll();
                             }
                             AppMode::Query => {
                                 query::handle_query_key(
@@ -192,7 +192,7 @@ pub async fn run(api_key: String, config: Config) -> Result<()> {
                             app.reset_update_state();
                             // 如果 PM 已检测到，直接检查可用更新
                             if let Some(pm) = app.package_manager.clone() {
-                                app.update_lines.push("正在检查可用更新...".to_string());
+                                app.update.lines.push("正在检查可用更新...".to_string());
                                 let tx_clone = tx.clone();
                                 tokio::spawn(async move {
                                     let updates = tokio::task::spawn_blocking(move || pm.check_updates())
@@ -215,7 +215,7 @@ pub async fn run(api_key: String, config: Config) -> Result<()> {
                             app.reset_remove_state();
                             // 自动加载已安装包列表
                             if let Some(pm) = app.package_manager.clone() {
-                                app.remove_loading = true;
+                                app.remove.loading = true;
                                 let tx_clone = tx.clone();
                                 tokio::spawn(async move {
                                     let packages = tokio::task::spawn_blocking(move || {
@@ -242,20 +242,20 @@ pub async fn run(api_key: String, config: Config) -> Result<()> {
                     _ => {
                         match app.mode {
                             AppMode::Update => {
-                                if key.code == KeyCode::Enter && app.state == AppState::PreviewingUpdates {
+                                if key.code == KeyCode::Enter && app.update.phase == UpdatePhase::PreviewingUpdates {
                                     // Enter：sudo 鉴权 + 开始更新
-                                    if !app.update_preview.is_empty() {
+                                    if !app.update.preview.is_empty() {
                                         match validate_sudo_tui(&mut terminal) {
                                             Ok(true) => {
                                                 update::spawn_update_task(&mut app, &tx);
                                             }
                                             Ok(false) => {
                                                 app.error_message = Some("sudo 验证失败，请确保你有 sudo 权限".to_string());
-                                                app.state = AppState::Error;
+                                                app.update.phase = UpdatePhase::Error;
                                             }
                                             Err(e) => {
                                                 app.error_message = Some(format!("sudo 验证出错: {}", e));
-                                                app.state = AppState::Error;
+                                                app.update.phase = UpdatePhase::Error;
                                             }
                                         }
                                     }
@@ -265,8 +265,8 @@ pub async fn run(api_key: String, config: Config) -> Result<()> {
                             }
                             AppMode::Install => {
                                 if key.code == KeyCode::Enter
-                                    && app.install_state == state::InstallState::PreviewingInstall
-                                    && app.install_preview.len() > 1
+                                    && app.install.phase == state::InstallPhase::PreviewingInstall
+                                    && app.install.preview.len() > 1
                                 {
                                     // Enter in preview: sudo → install
                                     match validate_sudo_tui(&mut terminal) {
@@ -275,11 +275,11 @@ pub async fn run(api_key: String, config: Config) -> Result<()> {
                                         }
                                         Ok(false) => {
                                             app.error_message = Some("sudo 验证失败，请确保你有 sudo 权限".to_string());
-                                            app.install_state = state::InstallState::Error;
+                                            app.install.phase = state::InstallPhase::Error;
                                         }
                                         Err(e) => {
                                             app.error_message = Some(format!("sudo 验证出错: {}", e));
-                                            app.install_state = state::InstallState::Error;
+                                            app.install.phase = state::InstallPhase::Error;
                                         }
                                     }
                                 } else {
@@ -288,8 +288,8 @@ pub async fn run(api_key: String, config: Config) -> Result<()> {
                             }
                             AppMode::Remove => {
                                 if key.code == KeyCode::Enter
-                                    && app.remove_state == state::RemoveState::PreviewingRemove
-                                    && app.remove_preview.len() > 1
+                                    && app.remove.phase == state::RemovePhase::PreviewingRemove
+                                    && app.remove.preview.len() > 1
                                 {
                                     // Enter in preview: sudo → remove
                                     match validate_sudo_tui(&mut terminal) {
@@ -298,11 +298,11 @@ pub async fn run(api_key: String, config: Config) -> Result<()> {
                                         }
                                         Ok(false) => {
                                             app.error_message = Some("sudo 验证失败，请确保你有 sudo 权限".to_string());
-                                            app.remove_state = state::RemoveState::Error;
+                                            app.remove.phase = state::RemovePhase::Error;
                                         }
                                         Err(e) => {
                                             app.error_message = Some(format!("sudo 验证出错: {}", e));
-                                            app.remove_state = state::RemoveState::Error;
+                                            app.remove.phase = state::RemovePhase::Error;
                                         }
                                     }
                                 } else {
@@ -329,10 +329,10 @@ pub async fn run(api_key: String, config: Config) -> Result<()> {
                     app.package_manager = Some(pm);
                     // 如果当前在更新模式且还在检测状态，自动检查更新
                     if app.mode == AppMode::Update
-                        && app.state == AppState::PackageManagerCheck
+                        && app.update.phase == UpdatePhase::PackageManagerCheck
                     {
                         if let Some(pm) = app.package_manager.clone() {
-                            app.update_lines.push("正在检查可用更新...".to_string());
+                            app.update.lines.push("正在检查可用更新...".to_string());
                             let tx_clone = tx.clone();
                             tokio::spawn(async move {
                                 let updates = tokio::task::spawn_blocking(move || pm.check_updates())
@@ -358,18 +358,18 @@ pub async fn run(api_key: String, config: Config) -> Result<()> {
                     app.installed_count = Some(count);
                 }
                 AppEvent::UpdateLine(line) => {
-                    app.add_update_line(line);
+                    app.update.add_line(line);
                 }
                 AppEvent::UpdateComplete {
                     output,
                     packages_before,
                     packages_after,
                 } => {
-                    app.update_output = Some(output);
-                    app.packages_before = packages_before;
-                    app.packages_after = packages_after;
-                    app.state = AppState::UpdateComplete;
-                    app.add_update_line("--- 更新完成 ---".to_string());
+                    app.update.output = Some(output);
+                    app.update.packages_before = packages_before;
+                    app.update.packages_after = packages_after;
+                    app.update.phase = UpdatePhase::UpdateComplete;
+                    app.update.add_line("--- 更新完成 ---".to_string());
 
                     // 启动 AI 分析
                     update::handle_update_complete(&mut app, &tx, &api_key);
@@ -380,71 +380,71 @@ pub async fn run(api_key: String, config: Config) -> Result<()> {
                 AppEvent::ReportSaved(path) => {
                     // 根据当前模式分配报告路径
                     match app.mode {
-                        AppMode::Install => { app.install_saved_report = Some(path); }
-                        AppMode::Remove => { app.remove_saved_report = Some(path); }
-                        _ => { app.saved_report_path = Some(path); }
+                        AppMode::Install => { app.install.report_path = Some(path); }
+                        AppMode::Remove => { app.remove.report_path = Some(path); }
+                        _ => { app.update.report_path = Some(path); }
                     }
                 }
                 AppEvent::Error(msg) => {
                     app.error_message = Some(msg.clone());
                     // 根据当前模式设置对应错误状态
                     match app.mode {
-                        AppMode::Install => { app.install_state = state::InstallState::Error; }
-                        AppMode::Remove => { app.remove_state = state::RemoveState::Error; }
-                        _ => { app.state = AppState::Error; }
+                        AppMode::Install => { app.install.phase = state::InstallPhase::Error; }
+                        AppMode::Remove => { app.remove.phase = state::RemovePhase::Error; }
+                        _ => { app.update.phase = UpdatePhase::Error; }
                     }
                 }
                 AppEvent::QueryLocalResults(results) => {
-                    app.query_local_results = results;
-                    app.query_local_selected = 0;
-                    app.query_searching = false;
+                    app.query.local_results = results;
+                    app.query.local_selected = 0;
+                    app.query.searching = false;
                 }
                 AppEvent::QueryRemoteResults(results) => {
-                    app.query_remote_results = results;
-                    app.query_remote_selected = 0;
-                    app.query_searching = false;
+                    app.query.remote_results = results;
+                    app.query.remote_selected = 0;
+                    app.query.searching = false;
                 }
                 AppEvent::QueryDetailLoaded { detail, files, dirs } => {
-                    app.query_detail = Some(detail);
-                    app.query_files = files;
-                    app.query_dirs = dirs;
-                    app.query_file_mode = state::FileListMode::Files;
-                    app.query_detail_scroll = 0;
-                    app.query_view = state::QueryView::Detail;
+                    app.query.detail = Some(detail);
+                    app.query.files = files;
+                    app.query.dirs = dirs;
+                    app.query.file_mode = state::FileListMode::Files;
+                    app.query.detail_scroll = 0;
+                    app.query.view = state::QueryView::Detail;
                 }
                 AppEvent::UpdatePreviewReady(updates) => {
-                    app.update_preview = updates;
-                    app.update_lines.clear();
-                    if app.update_preview.is_empty() {
-                        app.update_lines.push("系统已是最新，没有可用更新。".to_string());
+                    app.update.preview = updates;
+                    app.update.lines.clear();
+                    if app.update.preview.is_empty() {
+                        app.update.lines.push("系统已是最新，没有可用更新。".to_string());
                     } else {
-                        app.update_lines.push(format!("找到 {} 个可用更新：", app.update_preview.len()));
-                        app.update_lines.push(String::new());
-                        for pkg in &app.update_preview {
-                            app.update_lines.push(format!("  {}", pkg));
+                        app.update.lines.push(format!("找到 {} 个可用更新：", app.update.preview.len()));
+                        app.update.lines.push(String::new());
+                        for pkg in &app.update.preview {
+                            app.update.lines.push(format!("  {}", pkg));
                         }
                     }
-                    app.state = AppState::PreviewingUpdates;
-                    app.reset_scroll();
+                    app.update.phase = UpdatePhase::PreviewingUpdates;
+                    app.update.reset_scroll();
                 }
                 // ===== Install 事件 =====
                 AppEvent::InstallSearchResults(results) => {
-                    app.install_results = results;
-                    app.install_selected = 0;
-                    app.install_marked.clear();
-                    app.install_searching = false;
+                    app.install.results = results;
+                    app.install.selected = 0;
+                    app.install.marked.clear();
+                    app.install.searching = false;
                 }
                 AppEvent::InstallPreviewReady(preview) => {
-                    app.install_preview = preview;
-                    app.install_scroll = 0;
+                    app.install.preview = preview;
+                    app.install.scroll = 0;
                 }
                 AppEvent::InstallLine(line) => {
-                    app.add_install_line(line);
+                    app.install.add_line(line);
                 }
                 AppEvent::InstallComplete { output } => {
-                    app.install_output = Some(output);
-                    app.install_state = state::InstallState::InstallComplete;
-                    app.add_install_line("--- 安装完成 ---".to_string());
+                    app.install.output = Some(output);
+                    app.install.phase = state::InstallPhase::InstallComplete;
+                    app.install.add_line("--- 安装完成 ---".to_string());
                     install::handle_install_complete(&mut app, &tx, &api_key);
                     // 刷新已安装包数量
                     if let Some(pm) = &app.package_manager {
@@ -457,21 +457,21 @@ pub async fn run(api_key: String, config: Config) -> Result<()> {
                 }
                 // ===== Remove 事件 =====
                 AppEvent::RemovePackagesLoaded(packages) => {
-                    app.remove_packages = packages;
-                    app.remove_loading = false;
-                    app.apply_remove_filter();
+                    app.remove.packages = packages;
+                    app.remove.loading = false;
+                    app.remove.apply_filter();
                 }
                 AppEvent::RemovePreviewReady(preview) => {
-                    app.remove_preview = preview;
-                    app.remove_scroll = 0;
+                    app.remove.preview = preview;
+                    app.remove.scroll = 0;
                 }
                 AppEvent::RemoveLine(line) => {
-                    app.add_remove_line(line);
+                    app.remove.add_line(line);
                 }
                 AppEvent::RemoveComplete { output } => {
-                    app.remove_output = Some(output);
-                    app.remove_state = state::RemoveState::RemoveComplete;
-                    app.add_remove_line("--- 卸载完成 ---".to_string());
+                    app.remove.output = Some(output);
+                    app.remove.phase = state::RemovePhase::RemoveComplete;
+                    app.remove.add_line("--- 卸载完成 ---".to_string());
                     remove::handle_remove_complete(&mut app, &tx, &api_key);
                     // 刷新已安装包数量
                     if let Some(pm) = &app.package_manager {

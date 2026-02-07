@@ -1,6 +1,6 @@
 use super::input::InputBox;
 use super::layout;
-use super::state::{App, AppEvent, AppMode, RemoveState, ViewMode};
+use super::state::{App, AppEvent, AppMode, RemovePhase, ViewMode};
 use super::theme::{BLUE, BRIGHT_WHITE, DESC_DIM, DIM, PINK, SEL_BG};
 use crate::tui::input::{str_insert_char, str_delete_back, str_delete_forward};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -17,11 +17,11 @@ use unicode_width::UnicodeWidthStr;
 /// 从 App 状态构建 InputBox 用于渲染
 fn input_box_from_app(app: &App) -> InputBox {
     let mut ib = InputBox::new();
-    for c in app.remove_input.chars() {
+    for c in app.remove.input.chars() {
         ib.insert(c);
     }
     ib.move_home();
-    for _ in 0..app.remove_cursor {
+    for _ in 0..app.remove.cursor {
         ib.move_right();
     }
     ib
@@ -34,14 +34,14 @@ pub fn handle_remove_key(
     tx: &mpsc::Sender<AppEvent>,
     term_height: u16,
 ) -> bool {
-    match app.remove_state {
-        RemoveState::Browsing => handle_browsing_key(key, app, tx),
-        RemoveState::PreviewingRemove => handle_preview_key(key, app),
-        RemoveState::Removing => handle_output_key(key, app, term_height),
-        RemoveState::RemoveComplete => handle_output_key(key, app, term_height),
-        RemoveState::Analyzing => handle_output_key(key, app, term_height),
-        RemoveState::AnalysisComplete => handle_complete_key(key, app, term_height),
-        RemoveState::Error => handle_output_key(key, app, term_height),
+    match app.remove.phase {
+        RemovePhase::Browsing => handle_browsing_key(key, app, tx),
+        RemovePhase::PreviewingRemove => handle_preview_key(key, app),
+        RemovePhase::Removing => handle_output_key(key, app, term_height),
+        RemovePhase::RemoveComplete => handle_output_key(key, app, term_height),
+        RemovePhase::Analyzing => handle_output_key(key, app, term_height),
+        RemovePhase::AnalysisComplete => handle_complete_key(key, app, term_height),
+        RemovePhase::Error => handle_output_key(key, app, term_height),
     }
 }
 
@@ -58,29 +58,29 @@ fn handle_browsing_key(
             true
         }
         KeyCode::Up => {
-            app.remove_selected = app.remove_selected.saturating_sub(1);
+            app.remove.selected = app.remove.selected.saturating_sub(1);
             true
         }
         KeyCode::Down => {
-            let max = app.remove_filtered.len().saturating_sub(1);
-            if app.remove_selected < max {
-                app.remove_selected += 1;
+            let max = app.remove.filtered.len().saturating_sub(1);
+            if app.remove.selected < max {
+                app.remove.selected += 1;
             }
             true
         }
         KeyCode::Char(' ') => {
             // 多选切换（使用原始索引标记）
-            if !app.remove_filtered.is_empty() {
-                if let Some(&real_idx) = app.remove_filtered.get(app.remove_selected) {
-                    if app.remove_marked.contains(&real_idx) {
-                        app.remove_marked.remove(&real_idx);
+            if !app.remove.filtered.is_empty() {
+                if let Some(&real_idx) = app.remove.filtered.get(app.remove.selected) {
+                    if app.remove.marked.contains(&real_idx) {
+                        app.remove.marked.remove(&real_idx);
                     } else {
-                        app.remove_marked.insert(real_idx);
+                        app.remove.marked.insert(real_idx);
                     }
                     // 选中后自动下移
-                    let max = app.remove_filtered.len().saturating_sub(1);
-                    if app.remove_selected < max {
-                        app.remove_selected += 1;
+                    let max = app.remove.filtered.len().saturating_sub(1);
+                    if app.remove.selected < max {
+                        app.remove.selected += 1;
                     }
                 }
             }
@@ -88,7 +88,7 @@ fn handle_browsing_key(
         }
         KeyCode::Enter => {
             // 收集选中的包，获取卸载预览
-            if !app.remove_filtered.is_empty() {
+            if !app.remove.filtered.is_empty() {
                 let packages = collect_selected_packages(app);
                 if !packages.is_empty() {
                     if let Some(pm) = app.package_manager.clone() {
@@ -102,51 +102,51 @@ fn handle_browsing_key(
                             .unwrap_or_default();
                             let _ = tx_clone.send(AppEvent::RemovePreviewReady(preview)).await;
                         });
-                        app.remove_state = RemoveState::PreviewingRemove;
-                        app.remove_preview = vec!["正在获取卸载预览...".to_string()];
-                        app.remove_scroll = 0;
+                        app.remove.phase = RemovePhase::PreviewingRemove;
+                        app.remove.preview = vec!["正在获取卸载预览...".to_string()];
+                        app.remove.scroll = 0;
                     }
                 }
             }
             true
         }
         KeyCode::Backspace => {
-            str_delete_back(&mut app.remove_input, &mut app.remove_cursor);
-            app.apply_remove_filter();
+            str_delete_back(&mut app.remove.input, &mut app.remove.cursor);
+            app.remove.apply_filter();
             true
         }
         KeyCode::Delete => {
-            str_delete_forward(&mut app.remove_input, &mut app.remove_cursor);
-            app.apply_remove_filter();
+            str_delete_forward(&mut app.remove.input, &mut app.remove.cursor);
+            app.remove.apply_filter();
             true
         }
         KeyCode::Left => {
-            if app.remove_cursor > 0 {
-                app.remove_cursor -= 1;
+            if app.remove.cursor > 0 {
+                app.remove.cursor -= 1;
             }
             true
         }
         KeyCode::Right => {
-            let max = app.remove_input.chars().count();
-            if app.remove_cursor < max {
-                app.remove_cursor += 1;
+            let max = app.remove.input.chars().count();
+            if app.remove.cursor < max {
+                app.remove.cursor += 1;
             }
             true
         }
         KeyCode::Home => {
-            app.remove_cursor = 0;
+            app.remove.cursor = 0;
             true
         }
         KeyCode::End => {
-            app.remove_cursor = app.remove_input.chars().count();
+            app.remove.cursor = app.remove.input.chars().count();
             true
         }
         KeyCode::Char(c) => {
             if key.modifiers.contains(KeyModifiers::CONTROL) {
                 return false;
             }
-            str_insert_char(&mut app.remove_input, &mut app.remove_cursor, c);
-            app.apply_remove_filter();
+            str_insert_char(&mut app.remove.input, &mut app.remove.cursor, c);
+            app.remove.apply_filter();
             true
         }
         _ => false,
@@ -157,17 +157,17 @@ fn handle_browsing_key(
 fn handle_preview_key(key: KeyEvent, app: &mut App) -> bool {
     match key.code {
         KeyCode::Esc => {
-            app.remove_state = RemoveState::Browsing;
-            app.remove_preview.clear();
-            app.remove_scroll = 0;
+            app.remove.phase = RemovePhase::Browsing;
+            app.remove.preview.clear();
+            app.remove.scroll = 0;
             true
         }
         KeyCode::Up => {
-            app.remove_scroll = app.remove_scroll.saturating_sub(1);
+            app.remove.scroll = app.remove.scroll.saturating_sub(1);
             true
         }
         KeyCode::Down => {
-            app.remove_scroll += 1;
+            app.remove.scroll += 1;
             true
         }
         // Enter 在 mod.rs 中处理（需要 sudo）
@@ -179,12 +179,12 @@ fn handle_preview_key(key: KeyEvent, app: &mut App) -> bool {
 fn handle_output_key(key: KeyEvent, app: &mut App, term_height: u16) -> bool {
     match key.code {
         KeyCode::Esc => {
-            match app.remove_state {
-                RemoveState::Removing | RemoveState::Analyzing => {
+            match app.remove.phase {
+                RemovePhase::Removing | RemovePhase::Analyzing => {
                     // 进行中：取消并返回浏览
                     crate::package_manager::cancel_update();
-                    app.remove_state = RemoveState::Browsing;
-                    app.remove_scroll = 0;
+                    app.remove.phase = RemovePhase::Browsing;
+                    app.remove.scroll = 0;
                 }
                 _ => {
                     // 完成/错误：返回主页
@@ -195,27 +195,27 @@ fn handle_output_key(key: KeyEvent, app: &mut App, term_height: u16) -> bool {
             true
         }
         KeyCode::Up => {
-            app.remove_scroll = app.remove_scroll.saturating_sub(1);
+            app.remove.scroll = app.remove.scroll.saturating_sub(1);
             true
         }
         KeyCode::Down => {
-            let content = app.get_remove_content();
+            let content = app.remove.get_content();
             let visible = layout::visible_content_height(term_height);
             let max_scroll = content.len().saturating_sub(visible);
-            if app.remove_scroll < max_scroll {
-                app.remove_scroll += 1;
+            if app.remove.scroll < max_scroll {
+                app.remove.scroll += 1;
             }
             true
         }
         KeyCode::PageUp => {
-            app.remove_scroll = app.remove_scroll.saturating_sub(10);
+            app.remove.scroll = app.remove.scroll.saturating_sub(10);
             true
         }
         KeyCode::PageDown => {
-            let content = app.get_remove_content();
+            let content = app.remove.get_content();
             let visible = layout::visible_content_height(term_height);
             let max_scroll = content.len().saturating_sub(visible);
-            app.remove_scroll = (app.remove_scroll + 10).min(max_scroll);
+            app.remove.scroll = (app.remove.scroll + 10).min(max_scroll);
             true
         }
         _ => false,
@@ -226,11 +226,11 @@ fn handle_output_key(key: KeyEvent, app: &mut App, term_height: u16) -> bool {
 fn handle_complete_key(key: KeyEvent, app: &mut App, term_height: u16) -> bool {
     match key.code {
         KeyCode::Tab => {
-            app.remove_view_mode = match app.remove_view_mode {
+            app.remove.view_mode = match app.remove.view_mode {
                 ViewMode::UpdateLog => ViewMode::AIAnalysis,
                 ViewMode::AIAnalysis => ViewMode::UpdateLog,
             };
-            app.remove_scroll = 0;
+            app.remove.scroll = 0;
             true
         }
         _ => handle_output_key(key, app, term_height),
@@ -239,10 +239,10 @@ fn handle_complete_key(key: KeyEvent, app: &mut App, term_height: u16) -> bool {
 
 /// 收集选中的包名列表
 fn collect_selected_packages(app: &App) -> Vec<String> {
-    if app.remove_marked.is_empty() {
+    if app.remove.marked.is_empty() {
         // 没有多选标记，使用当前高亮项对应的原始索引
-        if let Some(&real_idx) = app.remove_filtered.get(app.remove_selected) {
-            if let Some(pkg) = app.remove_packages.get(real_idx) {
+        if let Some(&real_idx) = app.remove.filtered.get(app.remove.selected) {
+            if let Some(pkg) = app.remove.packages.get(real_idx) {
                 vec![pkg.name.clone()]
             } else {
                 Vec::new()
@@ -251,9 +251,9 @@ fn collect_selected_packages(app: &App) -> Vec<String> {
             Vec::new()
         }
     } else {
-        app.remove_marked
+        app.remove.marked
             .iter()
-            .filter_map(|&idx| app.remove_packages.get(idx))
+            .filter_map(|&idx| app.remove.packages.get(idx))
             .map(|pkg| pkg.name.clone())
             .collect()
     }
@@ -272,13 +272,13 @@ pub fn spawn_remove_task(app: &mut App, tx: &mpsc::Sender<AppEvent>) {
     }
 
     let tx_clone = tx.clone();
-    app.remove_state = RemoveState::Removing;
-    app.remove_lines.clear();
-    app.remove_lines.push(format!(
+    app.remove.phase = RemovePhase::Removing;
+    app.remove.lines.clear();
+    app.remove.lines.push(format!(
         "正在卸载: {} ...",
         packages.join(", ")
     ));
-    app.remove_scroll = 0;
+    app.remove.scroll = 0;
 
     std::thread::spawn(move || {
         let (output_tx, mut output_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -309,9 +309,9 @@ pub fn handle_remove_complete(
     tx: &mpsc::Sender<AppEvent>,
     api_key: &str,
 ) {
-    if let Some(output) = &app.remove_output {
+    if let Some(output) = &app.remove.output {
         if output.success && app.config.ai_enabled_for("remove") {
-            app.remove_state = RemoveState::Analyzing;
+            app.remove.phase = RemovePhase::Analyzing;
 
             let pm_name = app.package_manager.as_ref().unwrap().name().to_string();
             let remove_log = output.combined_output();
@@ -353,7 +353,7 @@ pub fn handle_remove_complete(
         } else if output.success && !app.config.ai_enabled_for("remove") {
             let mut new_output = output.clone();
             new_output.stdout.push_str("\n\n[AI 分析已关闭，可在设置中开启]");
-            app.remove_output = Some(new_output);
+            app.remove.output = Some(new_output);
         }
     }
 }
@@ -364,10 +364,10 @@ pub fn handle_remove_analysis_complete(
     analysis: String,
     tx: &mpsc::Sender<AppEvent>,
 ) {
-    app.remove_analysis = Some(analysis.clone());
-    app.remove_state = RemoveState::AnalysisComplete;
-    app.remove_view_mode = ViewMode::AIAnalysis;
-    app.remove_scroll = 0;
+    app.remove.analysis = Some(analysis.clone());
+    app.remove.phase = RemovePhase::AnalysisComplete;
+    app.remove.view_mode = ViewMode::AIAnalysis;
+    app.remove.scroll = 0;
 
     let report_dir = app.config.report_dir.clone();
     let distro_name = app.system_info.as_ref()
@@ -393,9 +393,9 @@ pub fn handle_remove_analysis_complete(
 
 /// 渲染卸载视图
 pub fn render_remove(f: &mut Frame, app: &App) {
-    match app.remove_state {
-        RemoveState::Browsing => render_browse_view(f, app),
-        RemoveState::PreviewingRemove => render_preview_view(f, app),
+    match app.remove.phase {
+        RemovePhase::Browsing => render_browse_view(f, app),
+        RemovePhase::PreviewingRemove => render_preview_view(f, app),
         _ => render_output_view(f, app),
     }
 }
@@ -423,7 +423,7 @@ fn render_browse_view(f: &mut Frame, app: &App) {
         return;
     }
 
-    if app.remove_loading {
+    if app.remove.loading {
         let loading = Paragraph::new("正在加载已安装包列表...")
             .style(Style::default().fg(Color::Yellow));
         f.render_widget(loading, padded);
@@ -451,8 +451,8 @@ fn render_browse_view(f: &mut Frame, app: &App) {
     // 统计行
     let stat_text = format!(
         "共 {} 个匹配 / 已安装 {} 个",
-        app.remove_filtered.len(),
-        app.remove_packages.len()
+        app.remove.filtered.len(),
+        app.remove.packages.len()
     );
     let stat_line = Paragraph::new(stat_text)
         .style(Style::default().fg(Color::DarkGray));
@@ -462,9 +462,9 @@ fn render_browse_view(f: &mut Frame, app: &App) {
     render_package_list(f, app, inner_chunks[2]);
 
     // Footer
-    let footer = if app.remove_filtered.is_empty() {
+    let footer = if app.remove.filtered.is_empty() {
         "输入关键词筛选已安装包 | Esc 返回"
-    } else if app.remove_marked.is_empty() {
+    } else if app.remove.marked.is_empty() {
         "↑↓ 选择 | Space 多选 | Enter 卸载选中 | Esc 返回"
     } else {
         "↑↓ 选择 | Space 多选/取消 | Enter 卸载标记项 | Esc 返回"
@@ -474,8 +474,8 @@ fn render_browse_view(f: &mut Frame, app: &App) {
 
 /// 渲染已安装包列表
 fn render_package_list(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
-    if app.remove_filtered.is_empty() {
-        if !app.remove_input.is_empty() {
+    if app.remove.filtered.is_empty() {
+        if !app.remove.input.is_empty() {
             let hint = Paragraph::new("  未找到匹配的包")
                 .style(Style::default().fg(Color::DarkGray));
             f.render_widget(hint, area);
@@ -484,20 +484,20 @@ fn render_package_list(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     }
 
     let visible_height = area.height as usize;
-    let total = app.remove_filtered.len();
+    let total = app.remove.filtered.len();
 
-    let scroll = if app.remove_selected >= visible_height {
-        app.remove_selected.saturating_sub(visible_height - 1)
+    let scroll = if app.remove.selected >= visible_height {
+        app.remove.selected.saturating_sub(visible_height - 1)
     } else {
         0
     };
 
     // 计算大小列对齐宽度
-    let max_name_width = app.remove_filtered
+    let max_name_width = app.remove.filtered
         .iter()
         .skip(scroll)
         .take(visible_height)
-        .filter_map(|&idx| app.remove_packages.get(idx))
+        .filter_map(|&idx| app.remove.packages.get(idx))
         .map(|pkg| {
             let display = format!("{} {}", pkg.name, pkg.version);
             UnicodeWidthStr::width(display.as_str())
@@ -505,15 +505,15 @@ fn render_package_list(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         .max()
         .unwrap_or(20);
 
-    let lines: Vec<Line> = app.remove_filtered
+    let lines: Vec<Line> = app.remove.filtered
         .iter()
         .enumerate()
         .skip(scroll)
         .take(visible_height)
         .map(|(display_idx, &real_idx)| {
-            let pkg = &app.remove_packages[real_idx];
-            let is_selected = display_idx == app.remove_selected;
-            let is_marked = app.remove_marked.contains(&real_idx);
+            let pkg = &app.remove.packages[real_idx];
+            let is_selected = display_idx == app.remove.selected;
+            let is_marked = app.remove.marked.contains(&real_idx);
 
             let marker = if is_marked { "[✓] " } else { "    " };
             let cursor = if is_selected { ">" } else { " " };
@@ -586,13 +586,13 @@ fn render_preview_view(f: &mut Frame, app: &App) {
     layout::render_scrollable_content(
         f,
         "将卸载以下软件包及其依赖",
-        &app.remove_preview,
-        app.remove_scroll,
+        &app.remove.preview,
+        app.remove.scroll,
         chunks[1],
     );
 
-    let footer = if app.remove_preview.len() == 1
-        && app.remove_preview[0].contains("正在获取")
+    let footer = if app.remove.preview.len() == 1
+        && app.remove.preview[0].contains("正在获取")
     {
         "正在获取卸载预览..."
     } else {
@@ -605,12 +605,12 @@ fn render_preview_view(f: &mut Frame, app: &App) {
 fn render_output_view(f: &mut Frame, app: &App) {
     let chunks = layout::main_layout(f.area());
 
-    let title = match app.remove_state {
-        RemoveState::Removing => "⚙️  正在卸载...",
-        RemoveState::RemoveComplete => "✅ 卸载完成",
-        RemoveState::Analyzing => "🤖 AI 分析中...",
-        RemoveState::AnalysisComplete => "✨ 分析完成",
-        RemoveState::Error => "❌ 错误",
+    let title = match app.remove.phase {
+        RemovePhase::Removing => "⚙️  正在卸载...",
+        RemovePhase::RemoveComplete => "✅ 卸载完成",
+        RemovePhase::Analyzing => "🤖 AI 分析中...",
+        RemovePhase::AnalysisComplete => "✨ 分析完成",
+        RemovePhase::Error => "❌ 错误",
         _ => "🗑️  卸载",
     };
 
@@ -630,8 +630,8 @@ fn render_output_view(f: &mut Frame, app: &App) {
         .alignment(Alignment::Center);
     f.render_widget(header, chunks[0]);
 
-    let content_title = if app.remove_state == RemoveState::AnalysisComplete {
-        match app.remove_view_mode {
+    let content_title = if app.remove.phase == RemovePhase::AnalysisComplete {
+        match app.remove.view_mode {
             ViewMode::UpdateLog => "卸载日志 [Tab 切换到 AI 分析]",
             ViewMode::AIAnalysis => "AI 分析报告 [Tab 切换到卸载日志]",
         }
@@ -639,30 +639,30 @@ fn render_output_view(f: &mut Frame, app: &App) {
         "卸载日志"
     };
 
-    let content = app.get_remove_content();
-    layout::render_scrollable_content(f, content_title, &content, app.remove_scroll, chunks[1]);
+    let content = app.remove.get_content();
+    layout::render_scrollable_content(f, content_title, &content, app.remove.scroll, chunks[1]);
 
     let owned_text: String;
-    let footer_text = match app.remove_state {
-        RemoveState::Removing => {
-            if app.remove_progress.is_empty() {
+    let footer_text = match app.remove.phase {
+        RemovePhase::Removing => {
+            if app.remove.progress.is_empty() {
                 "卸载进行中..."
             } else {
-                owned_text = format!("卸载进行中 | {}", app.remove_progress);
+                owned_text = format!("卸载进行中 | {}", app.remove.progress);
                 &owned_text
             }
         }
-        RemoveState::RemoveComplete => "卸载完成 | ↑↓ 滚动 | Esc 返回主页",
-        RemoveState::Analyzing => "AI 正在分析卸载内容...",
-        RemoveState::AnalysisComplete => {
-            if let Some(path) = &app.remove_saved_report {
+        RemovePhase::RemoveComplete => "卸载完成 | ↑↓ 滚动 | Esc 返回主页",
+        RemovePhase::Analyzing => "AI 正在分析卸载内容...",
+        RemovePhase::AnalysisComplete => {
+            if let Some(path) = &app.remove.report_path {
                 owned_text = format!("报告已保存: {} | Tab 切换视图 | Esc 返回主页", path);
                 &owned_text
             } else {
                 "Tab 切换视图 | ↑↓ 滚动 | Esc 返回主页"
             }
         }
-        RemoveState::Error => {
+        RemovePhase::Error => {
             if let Some(msg) = &app.error_message {
                 msg
             } else {
