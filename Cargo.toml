@@ -2,8 +2,8 @@
 name = "lian-pacman"
 version = "1.0.0"
 edition = "2021"
-authors = ["Your Name <your.email@example.com>"]
-description = "An AI-powered Arch Linux package update manager with TUI"
+authors = ["Lian <yichengxin7@gmail.com>"]
+description = "有 AI 自动总结的 Syu"
 
 [dependencies]
 # TUI 相关
@@ -31,6 +31,9 @@ env_logger = "0.11"
 
 # 配置文件
 toml = "0.8"
+
+# 命令行参数
+clap = { version = "4", features = ["derive"] }
 
 # 系统调用
 libc = "0.2"
