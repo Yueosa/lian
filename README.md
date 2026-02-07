@@ -37,9 +37,9 @@ paru / yay / pacman 的 TUI 前端，集成 AI 操作分析，适用于 Arch Lin
 ### 方法一：AUR 安装（推荐）
 
 ```bash
-paru -S lian
+paru -S lian-bin
 # 或
-yay -S lian
+yay -S lian-bin
 ```
 
 ### 方法二：下载预编译版本
