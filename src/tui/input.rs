@@ -119,3 +119,40 @@ pub fn render_input_box(
     let paragraph = Paragraph::new(Line::from(spans)).block(block);
     f.render_widget(paragraph, area);
 }
+
+// ===== 共享文本编辑工具函数 =====
+
+/// UTF-8 安全的字符位置转字节位置
+pub fn char_to_byte(s: &str, char_pos: usize) -> usize {
+    s.char_indices()
+        .nth(char_pos)
+        .map(|(i, _)| i)
+        .unwrap_or(s.len())
+}
+
+/// 在字符串的指定光标位置插入字符，返回新的光标位置
+pub fn str_insert_char(s: &mut String, cursor: &mut usize, c: char) {
+    let byte_pos = char_to_byte(s, *cursor);
+    s.insert(byte_pos, c);
+    *cursor += 1;
+}
+
+/// Backspace: 删除光标前的字符
+pub fn str_delete_back(s: &mut String, cursor: &mut usize) {
+    if *cursor > 0 {
+        *cursor -= 1;
+        let byte_pos = char_to_byte(s, *cursor);
+        let next_byte_pos = char_to_byte(s, *cursor + 1);
+        s.drain(byte_pos..next_byte_pos);
+    }
+}
+
+/// Delete: 删除光标后的字符
+pub fn str_delete_forward(s: &mut String, cursor: &mut usize) {
+    let char_count = s.chars().count();
+    if *cursor < char_count {
+        let byte_pos = char_to_byte(s, *cursor);
+        let next_byte_pos = char_to_byte(s, *cursor + 1);
+        s.drain(byte_pos..next_byte_pos);
+    }
+}

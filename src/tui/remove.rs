@@ -2,6 +2,7 @@ use super::input::InputBox;
 use super::layout;
 use super::state::{App, AppEvent, AppMode, RemoveState, ViewMode};
 use super::theme::{BLUE, BRIGHT_WHITE, DESC_DIM, DIM, PINK, SEL_BG};
+use crate::tui::input::{str_insert_char, str_delete_back, str_delete_forward};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     layout::{Alignment, Margin},
@@ -24,38 +25,6 @@ fn input_box_from_app(app: &App) -> InputBox {
         ib.move_right();
     }
     ib
-}
-
-/// UTF-8 安全的字符位置转字节位置
-fn char_to_byte(s: &str, char_pos: usize) -> usize {
-    s.char_indices()
-        .nth(char_pos)
-        .map(|(i, _)| i)
-        .unwrap_or(s.len())
-}
-
-fn insert_char(app: &mut App, c: char) {
-    let byte_pos = char_to_byte(&app.remove_input, app.remove_cursor);
-    app.remove_input.insert(byte_pos, c);
-    app.remove_cursor += 1;
-}
-
-fn delete_back(app: &mut App) {
-    if app.remove_cursor > 0 {
-        app.remove_cursor -= 1;
-        let byte_pos = char_to_byte(&app.remove_input, app.remove_cursor);
-        let next_byte_pos = char_to_byte(&app.remove_input, app.remove_cursor + 1);
-        app.remove_input.drain(byte_pos..next_byte_pos);
-    }
-}
-
-fn delete_forward(app: &mut App) {
-    let char_count = app.remove_input.chars().count();
-    if app.remove_cursor < char_count {
-        let byte_pos = char_to_byte(&app.remove_input, app.remove_cursor);
-        let next_byte_pos = char_to_byte(&app.remove_input, app.remove_cursor + 1);
-        app.remove_input.drain(byte_pos..next_byte_pos);
-    }
 }
 
 /// 处理卸载模式按键
@@ -142,12 +111,12 @@ fn handle_browsing_key(
             true
         }
         KeyCode::Backspace => {
-            delete_back(app);
+            str_delete_back(&mut app.remove_input, &mut app.remove_cursor);
             app.apply_remove_filter();
             true
         }
         KeyCode::Delete => {
-            delete_forward(app);
+            str_delete_forward(&mut app.remove_input, &mut app.remove_cursor);
             app.apply_remove_filter();
             true
         }
@@ -176,7 +145,7 @@ fn handle_browsing_key(
             if key.modifiers.contains(KeyModifiers::CONTROL) {
                 return false;
             }
-            insert_char(app, c);
+            str_insert_char(&mut app.remove_input, &mut app.remove_cursor, c);
             app.apply_remove_filter();
             true
         }

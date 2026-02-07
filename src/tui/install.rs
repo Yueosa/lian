@@ -2,6 +2,7 @@ use super::input::InputBox;
 use super::layout;
 use super::state::{App, AppEvent, AppMode, InstallState, ViewMode};
 use super::theme::{BLUE, BRIGHT_WHITE, DESC_DIM, DIM, PINK, SEL_BG};
+use crate::tui::input::{str_insert_char, str_delete_back, str_delete_forward};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     layout::{Alignment, Margin},
@@ -23,38 +24,6 @@ use tokio::sync::mpsc;
         ib.move_right();
     }
     ib
-}
-
-/// UTF-8 安全的字符位置转字节位置
-fn char_to_byte(s: &str, char_pos: usize) -> usize {
-    s.char_indices()
-        .nth(char_pos)
-        .map(|(i, _)| i)
-        .unwrap_or(s.len())
-}
-
-fn insert_char(app: &mut App, c: char) {
-    let byte_pos = char_to_byte(&app.install_input, app.install_cursor);
-    app.install_input.insert(byte_pos, c);
-    app.install_cursor += 1;
-}
-
-fn delete_back(app: &mut App) {
-    if app.install_cursor > 0 {
-        app.install_cursor -= 1;
-        let byte_pos = char_to_byte(&app.install_input, app.install_cursor);
-        let next_byte_pos = char_to_byte(&app.install_input, app.install_cursor + 1);
-        app.install_input.drain(byte_pos..next_byte_pos);
-    }
-}
-
-fn delete_forward(app: &mut App) {
-    let char_count = app.install_input.chars().count();
-    if app.install_cursor < char_count {
-        let byte_pos = char_to_byte(&app.install_input, app.install_cursor);
-        let next_byte_pos = char_to_byte(&app.install_input, app.install_cursor + 1);
-        app.install_input.drain(byte_pos..next_byte_pos);
-    }
 }
 
 /// 处理安装模式按键
@@ -140,12 +109,12 @@ fn handle_searching_key(
             true
         }
         KeyCode::Backspace => {
-            delete_back(app);
+            str_delete_back(&mut app.install_input, &mut app.install_cursor);
             trigger_search(app, tx);
             true
         }
         KeyCode::Delete => {
-            delete_forward(app);
+            str_delete_forward(&mut app.install_input, &mut app.install_cursor);
             trigger_search(app, tx);
             true
         }
@@ -174,7 +143,7 @@ fn handle_searching_key(
             if key.modifiers.contains(KeyModifiers::CONTROL) {
                 return false;
             }
-            insert_char(app, c);
+            str_insert_char(&mut app.install_input, &mut app.install_cursor, c);
             trigger_search(app, tx);
             true
         }

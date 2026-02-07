@@ -1,4 +1,4 @@
-use super::input::{self, InputBox};
+use super::input::{self, InputBox, str_insert_char, str_delete_back, str_delete_forward};
 use super::layout;
 use super::state::{App, AppEvent, FileListMode, QueryPanel, QueryView};
 use super::theme::{BLUE, BRIGHT_WHITE, DESC_DIM, DIM, PINK, SEL_BG};
@@ -121,15 +121,15 @@ fn handle_list_key(
             {
                 return;
             }
-            insert_char(app, c);
+            str_insert_char(&mut app.query_input, &mut app.query_cursor, c);
             trigger_search(app, tx);
         }
         KeyCode::Backspace => {
-            delete_back(app);
+            str_delete_back(&mut app.query_input, &mut app.query_cursor);
             trigger_search(app, tx);
         }
         KeyCode::Delete => {
-            delete_forward(app);
+            str_delete_forward(&mut app.query_input, &mut app.query_cursor);
             trigger_search(app, tx);
         }
         KeyCode::Left => {
@@ -151,40 +151,6 @@ fn handle_list_key(
         }
         _ => {}
     }
-}
-
-/// 在光标位置插入字符
-fn insert_char(app: &mut App, c: char) {
-    let byte_pos = char_to_byte(&app.query_input, app.query_cursor);
-    app.query_input.insert(byte_pos, c);
-    app.query_cursor += 1;
-}
-
-/// Backspace
-fn delete_back(app: &mut App) {
-    if app.query_cursor > 0 {
-        app.query_cursor -= 1;
-        let byte_pos = char_to_byte(&app.query_input, app.query_cursor);
-        let next_byte_pos = char_to_byte(&app.query_input, app.query_cursor + 1);
-        app.query_input.drain(byte_pos..next_byte_pos);
-    }
-}
-
-/// Delete
-fn delete_forward(app: &mut App) {
-    let char_count = app.query_input.chars().count();
-    if app.query_cursor < char_count {
-        let byte_pos = char_to_byte(&app.query_input, app.query_cursor);
-        let next_byte_pos = char_to_byte(&app.query_input, app.query_cursor + 1);
-        app.query_input.drain(byte_pos..next_byte_pos);
-    }
-}
-
-fn char_to_byte(s: &str, char_pos: usize) -> usize {
-    s.char_indices()
-        .nth(char_pos)
-        .map(|(i, _)| i)
-        .unwrap_or(s.len())
 }
 
 /// 触发异步搜索
