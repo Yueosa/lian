@@ -6,6 +6,7 @@ pub mod types;
 
 // 重新导出常用类型和函数
 pub use streaming::cancel_update;
+pub use streaming::cleanup_child_processes;
 pub use types::{InstalledPackage, PackageDetail, PackageInfo, UpdateOutput};
 
 use anyhow::{anyhow, Result};

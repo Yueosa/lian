@@ -19,7 +19,8 @@ pub fn cancel_update() {
     let pid = CHILD_PID.load(Ordering::SeqCst);
     if pid != 0 {
         unsafe {
-            libc::kill(pid as i32, libc::SIGTERM);
+            // 发送 SIGTERM 到整个进程组（sudo + pacman + 所有子进程）
+            libc::kill(-(pid as i32), libc::SIGTERM);
         }
     }
 }
@@ -28,6 +29,29 @@ pub fn cancel_update() {
 pub fn reset_cancel() {
     SHOULD_CANCEL.store(false, Ordering::SeqCst);
     CHILD_PID.store(0, Ordering::SeqCst);
+}
+
+/// 清理残留子进程（退出应用时调用）
+pub fn cleanup_child_processes() {
+    let pid = CHILD_PID.load(Ordering::SeqCst);
+    if pid != 0 {
+        unsafe {
+            // 先发 SIGTERM 让 pacman 正常清理锁文件
+            libc::kill(-(pid as i32), libc::SIGTERM);
+        }
+        // 给 pacman 时间清理锁文件
+        std::thread::sleep(std::time::Duration::from_millis(800));
+        unsafe {
+            // 仍未退出则强制杀死
+            libc::kill(-(pid as i32), libc::SIGKILL);
+        }
+        // 回收僵尸进程
+        unsafe {
+            libc::waitpid(-(pid as i32), std::ptr::null_mut(), libc::WNOHANG);
+        }
+        CHILD_PID.store(0, Ordering::SeqCst);
+        SHOULD_CANCEL.store(false, Ordering::SeqCst);
+    }
 }
 
 /// 检查是否应该取消
@@ -127,6 +151,8 @@ fn run_streaming_command(
         cmd.stderr(Stdio::piped());
         unsafe {
             cmd.pre_exec(|| {
+                // 创建独立进程组，方便统一杀死 sudo + pacman 整棵进程树
+                libc::setpgid(0, 0);
                 libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
                 Ok(())
             });
@@ -141,6 +167,7 @@ fn run_streaming_command(
         cmd.stderr(Stdio::piped());
         unsafe {
             cmd.pre_exec(|| {
+                libc::setpgid(0, 0);
                 libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
                 Ok(())
             });
@@ -165,7 +192,15 @@ fn run_streaming_command(
 
     let cancelled = should_cancel();
     if cancelled {
-        let _ = child.kill();
+        // 给 pacman 时间处理 SIGTERM 并清理锁文件
+        std::thread::sleep(std::time::Duration::from_millis(800));
+        // 如果进程仍然存活，强制杀死整个进程组
+        let pid = CHILD_PID.load(Ordering::SeqCst);
+        if pid != 0 {
+            unsafe {
+                libc::kill(-(pid as i32), libc::SIGKILL);
+            }
+        }
         let _ = child.wait();
         CHILD_PID.store(0, Ordering::SeqCst);
         return Ok(UpdateOutput {

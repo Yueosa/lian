@@ -519,6 +519,9 @@ pub async fn run(api_key: String, config: Config) -> Result<()> {
         }
     }
 
+    // 清理残留的 pacman/paru 子进程，确保释放 db.lck
+    crate::package_manager::cleanup_child_processes();
+
     // 恢复终端
     disable_raw_mode()?;
     execute!(
