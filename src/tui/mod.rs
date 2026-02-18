@@ -123,6 +123,21 @@ pub async fn run(api_key: String, config: Config) -> Result<()> {
                 _ => {}
             }
         }
+        // Shell 模式 clamp scroll（Running/Done/Error 阶段）
+        if app.mode == AppMode::Shell {
+            match app.shell.phase {
+                state::ShellPhase::Running
+                | state::ShellPhase::Done
+                | state::ShellPhase::Error => {
+                    let content = app.shell.get_content();
+                    let term_size = terminal.size()?;
+                    let visible = layout::visible_content_height(term_size.height);
+                    let max_scroll = content.len().saturating_sub(visible);
+                    app.shell.scroll = app.shell.scroll.min(max_scroll);
+                }
+                _ => {}
+            }
+        }
 
         // 防抖: 延迟执行搜索，避免每次按键都触发
         {
