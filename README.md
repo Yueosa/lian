@@ -17,15 +17,17 @@ paru / yay / pacman 的 TUI 前端，集成 AI 操作分析，适用于 Arch Lin
 ## ✨ 特性
 
 - 🎯 **智能检测** - 自动检测包管理器 (paru → yay → pacman)
-- 🖥️ **精美 TUI** - 基于 ratatui 的终端界面，六大功能模块
+- 🖥️ **精美 TUI** - 基于 ratatui 的终端界面，七大功能模块
 - 📦 **系统更新** (Shift+U) - 流式输出、更新预览、AI 分析报告
 - 🔽 **软件安装** (Shift+S) - 远程搜索、多选安装、依赖预览
 - 🗑️ **软件卸载** (Shift+R) - 筛选已安装包、多选卸载、孤立依赖清理
 - 🔍 **软件查询** (Shift+Q) - 本地/远程双面板搜索、包详情、文件列表
+- 🖥️ **自定义命令** (Shift+X) - 直接在 TUI 内执行任意 Shell 命令，流式输出，支持历史记录
 - ⚙️ **设置** (Shift+C) - TUI 内配置编辑，无需手动改文件
 - 🤖 **AI 分析** - 支持对更新/安装/卸载操作的 AI 深度分析（默认 DeepSeek，兼容 OpenAI 格式）
 - 🔍 **系统感知** - 自动检测系统环境（内核、GPU、桌面环境等），AI 分析更有针对性
-- 💾 **自动存档** - 报告按操作类型和时间保存到 `~/.lian/pacman/YYYY/MM/DD/`
+- � **一键复制** - 在输出完成后按 `y` 可将当前页面全部内容复制到系统剪贴板（支持 Wayland/X11）
+- �💾 **自动存档** - 报告按操作类型和时间保存到 `~/.lian/pacman/YYYY/MM/DD/`
 
 ## 🚀 安装
 
@@ -33,6 +35,7 @@ paru / yay / pacman 的 TUI 前端，集成 AI 操作分析，适用于 Arch Lin
 
 - Arch Linux（或衍生发行版，如 Manjaro、EndeavourOS、CachyOS 等）
 - [DeepSeek API Key](https://platform.deepseek.com/api_keys) 或其他兼容 OpenAI 格式的 API
+- （可选）剪贴板工具之一：`wl-clipboard`（Wayland）、`xclip` 或 `xsel`（X11），用于 `y` 键复制功能
 
 ### 方法一：AUR 安装（推荐）
 
@@ -131,6 +134,7 @@ lian
 | `Shift+S` | 安装软件包 (-S) |
 | `Shift+R` | 卸载软件包 (-Rns) |
 | `Shift+Q` | 查询软件包 |
+| `Shift+X` | 自定义命令（Shell 模式） |
 | `Shift+C` | 设置 |
 | `Ctrl+C` | 取消当前操作并退出 |
 | `q` | 退出（仪表盘） |
@@ -145,6 +149,7 @@ lian
 | `Enter` | 确认操作 |
 | `Space` | 多选标记（安装/卸载） |
 | `Tab` | 切换视图（日志 ↔ AI 分析 / 本地 ↔ 远程 / 文件 ↔ 目录） |
+| `y` | 复制当前输出内容到剪贴板（更新/安装/卸载/Shell 完成后可用） |
 
 ### 查看历史报告
 
