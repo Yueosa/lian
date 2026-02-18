@@ -275,20 +275,27 @@ fn spawn_shell_task(app: &mut App, tx: &mpsc::Sender<AppEvent>, cmd: String) {
         let (output_tx, mut output_rx) = tokio::sync::mpsc::unbounded_channel();
 
         let tx_for_lines = tx_clone.clone();
-        std::thread::spawn(move || {
+        // 使用 JoinHandle 确保所有 ShellLine 都发送完毕后再发 ShellComplete
+        let forward_handle = std::thread::spawn(move || {
             while let Some(line) = output_rx.blocking_recv() {
                 let _ = tx_for_lines.blocking_send(AppEvent::ShellLine(line));
             }
         });
 
-        match crate::package_manager::run_custom_command_streaming(cmd_parts, output_tx) {
-            Ok(output) => {
-                let _ = tx_clone.blocking_send(AppEvent::ShellComplete { output });
-            }
-            Err(e) => {
-                let _ = tx_clone.blocking_send(AppEvent::Error(format!("命令执行失败: {}", e)));
-            }
-        }
+        let result = crate::package_manager::run_custom_command_streaming(cmd_parts, output_tx);
+
+        // 等待 forwarding 线程把所有行都发送到主 channel 后再发完成事件
+        let _ = forward_handle.join();
+
+        let output = match result {
+            Ok(o) => o,
+            Err(e) => crate::package_manager::UpdateOutput {
+                stdout: String::new(),
+                stderr: format!("执行失败: {}", e),
+                success: false,
+            },
+        };
+        let _ = tx_clone.blocking_send(AppEvent::ShellComplete { output });
     });
 }
 

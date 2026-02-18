@@ -469,6 +469,12 @@ pub async fn run(api_key: String, config: Config) -> Result<()> {
                     match app.mode {
                         AppMode::Install => { app.install.phase = state::InstallPhase::Error; }
                         AppMode::Remove => { app.remove.phase = state::RemovePhase::Error; }
+                        AppMode::Shell => {
+                            app.shell.lines.push(format!("错误: {}", msg));
+                            app.shell.lines.push("─── 命令失败 ───".to_string());
+                            app.shell.phase = state::ShellPhase::Done;
+                            app.shell.scroll = app.shell.lines.len().saturating_sub(1);
+                        }
                         _ => { app.update.phase = UpdatePhase::Error; }
                     }
                 }
