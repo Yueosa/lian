@@ -194,6 +194,15 @@ fn handle_done_key(
             }
             true
         }
+        KeyCode::Char('y') => {
+            let text = app.shell.lines.join("\n");
+            if layout::copy_to_clipboard(&text) {
+                app.shell.progress = "✓ 内容已复制到剪贴板".to_string();
+            } else {
+                app.shell.progress = "复制失败 (请确认已安装 wl-copy/xclip/xsel)".to_string();
+            }
+            true
+        }
         KeyCode::Up => {
             app.shell.scroll = app.shell.scroll.saturating_sub(1);
             true
@@ -469,15 +478,18 @@ fn render_output_view(
             }
         }
         ShellPhase::Done => {
-            if let Some(output) = &app.shell.output {
+            owned_footer = if !app.shell.progress.is_empty() {
+                format!("{} | Enter 重新执行 | Esc 新命令 | y 复制 | ↑↓ 滚动", app.shell.progress)
+            } else if let Some(output) = &app.shell.output {
                 if output.success {
-                    "✓ 命令成功 | Enter 重新执行 | Esc 新命令 | ↑↓ 滚动"
+                    "✓ 命令成功 | Enter 重新执行 | Esc 新命令 | y 复制 | ↑↓ 滚动".to_string()
                 } else {
-                    "✗ 命令失败 | Enter 重新执行 | Esc 新命令 | ↑↓ 滚动"
+                    "✗ 命令失败 | Enter 重新执行 | Esc 新命令 | y 复制 | ↑↓ 滚动".to_string()
                 }
             } else {
-                "Esc 返回输入 | Enter 重新执行 | ↑↓ 滚动"
-            }
+                "Esc 返回输入 | Enter 重新执行 | y 复制 | ↑↓ 滚动".to_string()
+            };
+            &owned_footer
         }
         ShellPhase::Error => "❌ 执行出错 | Esc 新命令 | ↑↓ 滚动",
         ShellPhase::Input => "",

@@ -192,6 +192,16 @@ fn handle_output_key(key: KeyEvent, app: &mut App, term_height: u16) -> bool {
             }
             true
         }
+        KeyCode::Char('y') => {
+            let content = app.install.get_content();
+            let text = content.join("\n");
+            if layout::copy_to_clipboard(&text) {
+                app.install.progress = "✓ 已复制到剪贴板".to_string();
+            } else {
+                app.install.progress = "复制失败 (请确认已安装 wl-copy/xclip/xsel)".to_string();
+            }
+            true
+        }
         KeyCode::Up => {
             app.install.scroll = app.install.scroll.saturating_sub(1);
             true
@@ -668,14 +678,24 @@ fn render_output_view(f: &mut Frame, app: &App) {
                 &owned_text
             }
         }
-        InstallPhase::InstallComplete => "安装完成 | ↑↓ 滚动 | Esc 返回主页",
-        InstallPhase::Analyzing => "AI 正在分析安装内容...",
-        InstallPhase::AnalysisComplete => {
-            if let Some(path) = &app.install.report_path {
-                owned_text = format!("报告已保存: {} | Tab 切换视图 | Esc 返回主页", path);
+        InstallPhase::InstallComplete => {
+            if !app.install.progress.is_empty() && (app.install.progress.starts_with('✓') || app.install.progress.starts_with("复制")) {
+                owned_text = format!("{} | y 复制 | ↑↓ 滚动 | Esc 返回主页", app.install.progress);
                 &owned_text
             } else {
-                "Tab 切换视图 | ↑↓ 滚动 | Esc 返回主页"
+                "安装完成 | y 复制 | ↑↓ 滚动 | Esc 返回主页"
+            }
+        }
+        InstallPhase::Analyzing => "AI 正在分析安装内容...",
+        InstallPhase::AnalysisComplete => {
+            if !app.install.progress.is_empty() && (app.install.progress.starts_with('✓') || app.install.progress.starts_with("复制")) {
+                owned_text = format!("{} | Tab 切换视图 | y 复制 | Esc 返回主页", app.install.progress);
+                &owned_text
+            } else if let Some(path) = &app.install.report_path {
+                owned_text = format!("报告已保存: {} | Tab 切换视图 | y 复制 | Esc 返回主页", path);
+                &owned_text
+            } else {
+                "Tab 切换视图 | y 复制 | ↑↓ 滚动 | Esc 返回主页"
             }
         }
         InstallPhase::Error => {

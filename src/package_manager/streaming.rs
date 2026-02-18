@@ -115,8 +115,8 @@ fn should_cancel() -> bool {
 }
 
 /// 从流中读取行并发送到 channel（通用辅助函数）
-/// `\n` 行正常发送；`\r` 行（pacman 下载进度条）以 "PROGRESS:" 前缀发送，
-/// 接收方可用来刷新进度显示而非追加到日志。
+/// `\n` 行正常发送，stderr 加 `⚠ ` 前缀；
+/// `\r` 行（pacman/paru 下载进度条）统一以 "PROGRESS:" 前缀发送，无论来自 stdout 还是 stderr。
 fn read_stream_lines(
     stream: Option<impl Read>,
     tx: &mpsc::UnboundedSender<String>,
@@ -150,7 +150,8 @@ fn read_stream_lines(
                         line_buffer.clear();
                     }
                     '\r' => {
-                        // pacman 下载进度条通过 \r 就地刷新，以特殊前缀发送供 TUI 显示进度
+                        // pacman/paru/yay 的下载进度条和 AUR 编译进度通过 \r 就地刷新
+                        // 无论来自 stdout 还是 stderr，都作为进度行发送，不追加到日志
                         let cleaned = clean_terminal_output(&line_buffer);
                         if !cleaned.trim().is_empty() {
                             let _ = tx.send(format!("PROGRESS:{}", cleaned));

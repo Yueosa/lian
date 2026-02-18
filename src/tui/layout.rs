@@ -99,3 +99,32 @@ pub fn render_scrollable_content(
 pub fn visible_content_height(term_height: u16) -> usize {
     term_height.saturating_sub(8) as usize
 }
+
+/// 将文本复制到系统剪贴板。
+/// 优先尝试 wl-copy（Wayland），然后 xclip，最后 xsel。
+/// 返回 true 表示成功，false 表示找不到可用工具。
+pub fn copy_to_clipboard(text: &str) -> bool {
+    let candidates: &[(&str, &[&str])] = &[
+        ("wl-copy", &[]),
+        ("xclip", &["-selection", "clipboard"]),
+        ("xsel", &["--clipboard", "--input"]),
+    ];
+    for (cmd, args) in candidates {
+        if let Ok(mut child) = std::process::Command::new(cmd)
+            .args(*args)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+        {
+            use std::io::Write;
+            if let Some(stdin) = child.stdin.as_mut() {
+                let _ = stdin.write_all(text.as_bytes());
+            }
+            if child.wait().map(|s| s.success()).unwrap_or(false) {
+                return true;
+            }
+        }
+    }
+    false
+}

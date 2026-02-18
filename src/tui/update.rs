@@ -48,6 +48,16 @@ pub fn handle_update_key(
             app.update.scroll_page_down(10, content.len(), visible);
             true
         }
+        KeyCode::Char('y') => {
+            let content = app.update.get_content();
+            let text = content.join("\n");
+            if layout::copy_to_clipboard(&text) {
+                app.update.progress = "✓ 已复制到剪贴板".to_string();
+            } else {
+                app.update.progress = "复制失败 (请确认已安装 wl-copy/xclip/xsel)".to_string();
+            }
+            true
+        }
         _ => false,
     }
 }
@@ -251,17 +261,27 @@ fn render_update_footer(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                 &owned_text
             }
         }
-        UpdatePhase::UpdateComplete => "更新完成 | ↑↓ 滚动 | Esc 返回主页",
+        UpdatePhase::UpdateComplete => {
+            if !app.update.progress.is_empty() && (app.update.progress.starts_with('✓') || app.update.progress.starts_with("复制")) {
+                owned_text = format!("{} | y 复制 | ↑↓ 滚动 | Esc 返回主页", app.update.progress);
+                &owned_text
+            } else {
+                "更新完成 | y 复制 | ↑↓ 滚动 | Esc 返回主页"
+            }
+        }
         UpdatePhase::Analyzing => "AI 正在分析更新内容...",
         UpdatePhase::AnalysisComplete => {
-            if let Some(path) = &app.update.report_path {
+            if !app.update.progress.is_empty() && (app.update.progress.starts_with('✓') || app.update.progress.starts_with("复制")) {
+                owned_text = format!("{} | Tab 切换视图 | y 复制 | ↑↓ 滚动 | Esc 返回主页 | q 退出", app.update.progress);
+                &owned_text
+            } else if let Some(path) = &app.update.report_path {
                 owned_text = format!(
-                    "报告已保存: {} | Tab 切换视图 | ↑↓ 滚动 | Esc 返回主页 | q 退出",
+                    "报告已保存: {} | Tab 切换视图 | y 复制 | ↑↓ 滚动 | Esc 返回主页 | q 退出",
                     path
                 );
                 &owned_text
             } else {
-                "Tab 切换视图 | ↑↓ 滚动 | Esc 返回主页 | q 退出"
+                "Tab 切换视图 | y 复制 | ↑↓ 滚动 | Esc 返回主页 | q 退出"
             }
         }
         UpdatePhase::Error => {
