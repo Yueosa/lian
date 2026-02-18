@@ -151,7 +151,11 @@ fn handle_running_key(key: KeyEvent, app: &mut App) -> bool {
             true
         }
         KeyCode::Down => {
-            app.shell.scroll += 1;
+            let content = app.shell.get_content();
+            // 使用与 clamp 相同的基准：lines 总数（渲染时再减 visible）
+            if app.shell.scroll + 1 < content.len() {
+                app.shell.scroll += 1;
+            }
             true
         }
         _ => false,
@@ -393,6 +397,7 @@ fn render_output_view(
 ) {
     let content = app.shell.get_content();
     let total_lines = content.len();
+    // content_area 是 main_layout 的 chunks[1]，减去 block 上下 border 2 行即可视行数
     let visible = content_area.height.saturating_sub(2) as usize;
     let scroll = app.shell.scroll.min(total_lines.saturating_sub(visible));
 

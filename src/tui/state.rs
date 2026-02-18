@@ -559,9 +559,7 @@ impl ShellModeState {
     }
 
     pub fn get_content(&self) -> Vec<String> {
-        if let Some(output) = &self.output {
-            output.combined_output().lines().map(|s| s.to_string()).collect()
-        } else if !self.lines.is_empty() {
+        if !self.lines.is_empty() {
             self.lines.clone()
         } else {
             vec![]

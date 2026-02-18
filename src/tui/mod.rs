@@ -577,15 +577,25 @@ pub async fn run(api_key: String, config: Config) -> Result<()> {
                 }
                 AppEvent::ShellComplete { output } => {
                     let success = output.success;
+                    // 把 stderr 中有内容的行追加到 lines（stdout 已经通过 ShellLine 流式写入）
+                    let stderr = output.stderr.clone();
                     app.shell.output = Some(output);
-                    app.shell.phase = if success {
-                        state::ShellPhase::Done
-                    } else {
-                        state::ShellPhase::Done // 失败也显示输出，由页脚提示错误
-                    };
-                    if !app.shell.lines.is_empty() {
-                        app.shell.scroll = app.shell.lines.len().saturating_sub(1);
+                    if !stderr.trim().is_empty() {
+                        for line in stderr.lines() {
+                            if !line.trim().is_empty() {
+                                app.shell.lines.push(format!("⚠ {}", line));
+                            }
+                        }
                     }
+                    // 追加完成标志行
+                    app.shell.lines.push(if success {
+                        "─── 命令完成 ───".to_string()
+                    } else {
+                        "─── 命令失败 ───".to_string()
+                    });
+                    app.shell.phase = state::ShellPhase::Done;
+                    // scroll 已由 add_line 自动推进，这里确保它指向最后一行
+                    app.shell.scroll = app.shell.lines.len().saturating_sub(1);
                 }
             }
         }
