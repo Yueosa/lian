@@ -86,6 +86,7 @@ pub fn render_dashboard(f: &mut Frame, app: &App) {
     lines.push(shortcut_line("S", " 安装软件包       "));
     lines.push(shortcut_line("R", " 卸载软件包       "));
     lines.push(shortcut_line("Q", " 查询软件包       "));
+    lines.push(shortcut_line("X", " 自定义命令       "));
     lines.push(shortcut_line("C", " 设置             "));
     lines.push(shortcut_line("q", " 退出             "));
 

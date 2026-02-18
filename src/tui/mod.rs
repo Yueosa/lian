@@ -6,6 +6,7 @@ mod query;
 mod remove;
 mod settings;
 pub mod state;
+mod shell;
 mod theme;
 mod update;
 
@@ -157,6 +158,7 @@ pub async fn run(api_key: String, config: Config) -> Result<()> {
                         if app.mode == AppMode::Update
                             || app.mode == AppMode::Install
                             || app.mode == AppMode::Remove
+                            || app.mode == AppMode::Shell
                         {
                             crate::package_manager::cancel_update();
                         }
@@ -200,9 +202,44 @@ pub async fn run(api_key: String, config: Config) -> Result<()> {
                                     &mut app,
                                 );
                             }
+                            AppMode::Shell => {
+                                shell::handle_shell_key(
+                                    crossterm::event::KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+                                    &mut app,
+                                    &tx,
+                                    term_size.height,
+                                );
+                            }
                         }
                     }
                     // 模式切换快捷键 (Shift + 字母)
+                    // 当处于文本输入状态时（Shell Input、Install 搜索、Remove 浏览、Query）不触发
+                    KeyCode::Char('U' | 'S' | 'R' | 'Q' | 'C' | 'X')
+                        if matches!(
+                            app.mode,
+                            AppMode::Shell
+                                | AppMode::Install
+                                | AppMode::Remove
+                                | AppMode::Query
+                        ) =>
+                    {
+                        // 转发给当前模式处理（作为普通字符输入）
+                        match app.mode {
+                            AppMode::Shell => {
+                                shell::handle_shell_key(key, &mut app, &tx, term_size.height);
+                            }
+                            AppMode::Install => {
+                                install::handle_install_key(key, &mut app, &tx, term_size.height);
+                            }
+                            AppMode::Remove => {
+                                remove::handle_remove_key(key, &mut app, &tx, term_size.height);
+                            }
+                            AppMode::Query => {
+                                query::handle_query_key(key, &mut app, &tx, term_size.height);
+                            }
+                            _ => {}
+                        }
+                    }
                     KeyCode::Char('U') => {
                         if app.mode != AppMode::Update {
                             app.mode = AppMode::Update;
@@ -254,6 +291,12 @@ pub async fn run(api_key: String, config: Config) -> Result<()> {
                     KeyCode::Char('C') => {
                         app.mode = AppMode::Settings;
                         app.build_settings_items();
+                    }
+                    KeyCode::Char('X') => {
+                        if app.mode != AppMode::Shell {
+                            app.mode = AppMode::Shell;
+                            app.reset_shell_state();
+                        }
                     }
                     // 委托给当前模式处理
                     _ => {
@@ -331,6 +374,9 @@ pub async fn run(api_key: String, config: Config) -> Result<()> {
                             }
                             AppMode::Settings => {
                                 settings::handle_settings_key(key, &mut app);
+                            }
+                            AppMode::Shell => {
+                                shell::handle_shell_key(key, &mut app, &tx, term_size.height);
                             }
                             AppMode::Dashboard => {}
                         }
@@ -511,6 +557,21 @@ pub async fn run(api_key: String, config: Config) -> Result<()> {
                 AppEvent::RemoveAnalysisComplete(analysis) => {
                     remove::handle_remove_analysis_complete(&mut app, analysis, &tx);
                 }
+                AppEvent::ShellLine(line) => {
+                    app.shell.add_line(line);
+                }
+                AppEvent::ShellComplete { output } => {
+                    let success = output.success;
+                    app.shell.output = Some(output);
+                    app.shell.phase = if success {
+                        state::ShellPhase::Done
+                    } else {
+                        state::ShellPhase::Done // 失败也显示输出，由页脚提示错误
+                    };
+                    if !app.shell.lines.is_empty() {
+                        app.shell.scroll = app.shell.lines.len().saturating_sub(1);
+                    }
+                }
             }
         }
 
@@ -588,5 +649,6 @@ fn ui(f: &mut Frame, app: &App) {
         AppMode::Remove => remove::render_remove(f, app),
         AppMode::Query => query::render_query(f, app),
         AppMode::Settings => settings::render_settings(f, app),
+        AppMode::Shell => shell::render_shell(f, app),
     }
 }

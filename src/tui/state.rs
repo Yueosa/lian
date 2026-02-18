@@ -14,6 +14,7 @@ pub enum AppMode {
     Remove,   // Shift+R: -Rns
     Query,    // Shift+Q: -Qs/-Ss/-Qi/-Ql
     Settings, // Shift+C: 设置
+    Shell,    // Shift+X: 自定义命令
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -73,6 +74,14 @@ pub enum RemovePhase {
     Error,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum ShellPhase {
+    Input,    // 输入命令
+    Running,  // 执行中
+    Done,     // 执行完成
+    Error,
+}
+
 /// 设置页面项目类型
 #[derive(Debug, Clone)]
 pub enum SettingsItem {
@@ -129,6 +138,9 @@ pub enum AppEvent {
     RemoveLine(String),
     RemoveComplete { output: UpdateOutput },
     RemoveAnalysisComplete(String),
+    // Shell
+    ShellLine(String),
+    ShellComplete { output: UpdateOutput },
 }
 
 // ========== 子状态结构体 ==========
@@ -215,11 +227,40 @@ pub struct SettingsModeState {
     pub scroll: usize,
 }
 
+pub struct ShellModeState {
+    /// 当前输入的命令
+    pub input: String,
+    /// 光标位置（字符索引）
+    pub cursor: usize,
+    /// 执行阶段
+    pub phase: ShellPhase,
+    /// 输出行
+    pub lines: Vec<String>,
+    /// 当前滚动偏移
+    pub scroll: usize,
+    /// 命令历史
+    pub history: Vec<String>,
+    /// 历史指针（None = 不处于历史浏览模式）
+    pub history_idx: Option<usize>,
+    /// 进度提示
+    pub progress: String,
+    /// 最终结果
+    pub output: Option<UpdateOutput>,
+}
+
 // ========== 子状态 impl ==========
 
 /// 从输出行中解析进度信息（共用）
 fn parse_progress_line(line: &str) -> Option<String> {
+    // PROGRESS: 前缀行（\r 进度条）直接取内容
+    if let Some(content) = line.strip_prefix("PROGRESS:") {
+        let s = content.trim();
+        if !s.is_empty() {
+            return Some(s.to_string());
+        }
+    }
     let trimmed = line.trim();
+    // (n/n) 格式: pacman 安装/升级进度
     if trimmed.starts_with('(') {
         if let Some(end) = trimmed.find(')') {
             let inner = trimmed[1..end].trim();
@@ -230,6 +271,7 @@ fn parse_progress_line(line: &str) -> Option<String> {
             }
         }
     }
+    // 下载速度标识: xxx iB/s
     if let Some(speed_pos) = trimmed.find("iB/s") {
         let before = &trimmed[..speed_pos + 4];
         if let Some(last_space) = before.rfind([' ', '\t']) {
@@ -292,6 +334,13 @@ impl UpdateModeState {
     }
 
     pub fn add_line(&mut self, line: String) {
+        // PROGRESS: 行只更新进度显示，不往日志中追加
+        if line.starts_with("PROGRESS:") {
+            if let Some(p) = parse_progress_line(&line) {
+                self.progress = p;
+            }
+            return;
+        }
         if let Some(p) = parse_progress_line(&line) {
             self.progress = p;
         }
@@ -384,6 +433,13 @@ impl InstallModeState {
     }
 
     pub fn add_line(&mut self, line: String) {
+        // PROGRESS: 行只更新进度显示，不往日志中追加
+        if line.starts_with("PROGRESS:") {
+            if let Some(p) = parse_progress_line(&line) {
+                self.progress = p;
+            }
+            return;
+        }
         if let Some(p) = parse_progress_line(&line) {
             self.progress = p;
         }
@@ -421,6 +477,13 @@ impl RemoveModeState {
     }
 
     pub fn add_line(&mut self, line: String) {
+        // PROGRESS: 行只更新进度显示，不往日志中追加
+        if line.starts_with("PROGRESS:") {
+            if let Some(p) = parse_progress_line(&line) {
+                self.progress = p;
+            }
+            return;
+        }
         if let Some(p) = parse_progress_line(&line) {
             self.progress = p;
         }
@@ -465,6 +528,47 @@ impl SettingsModeState {
     }
 }
 
+impl ShellModeState {
+    pub fn new() -> Self {
+        Self {
+            input: String::new(),
+            cursor: 0,
+            phase: ShellPhase::Input,
+            lines: Vec::new(),
+            scroll: 0,
+            history: Vec::new(),
+            history_idx: None,
+            progress: String::new(),
+            output: None,
+        }
+    }
+
+    pub fn add_line(&mut self, line: String) {
+        // PROGRESS: 行只更新进度显示，不往日志追加
+        if line.starts_with("PROGRESS:") {
+            self.progress = line[9..].trim().to_string();
+            return;
+        }
+        if let Some(p) = parse_progress_line(&line) {
+            self.progress = p;
+        }
+        self.lines.push(line);
+        if self.lines.len() > 1 {
+            self.scroll = self.lines.len().saturating_sub(1);
+        }
+    }
+
+    pub fn get_content(&self) -> Vec<String> {
+        if let Some(output) = &self.output {
+            output.combined_output().lines().map(|s| s.to_string()).collect()
+        } else if !self.lines.is_empty() {
+            self.lines.clone()
+        } else {
+            vec![]
+        }
+    }
+}
+
 // ========== App ==========
 
 pub struct App {
@@ -481,6 +585,7 @@ pub struct App {
     pub install: InstallModeState,
     pub remove: RemoveModeState,
     pub settings: SettingsModeState,
+    pub shell: ShellModeState,
 }
 
 impl App {
@@ -498,6 +603,7 @@ impl App {
             install: InstallModeState::new(),
             remove: RemoveModeState::new(),
             settings: SettingsModeState::new(),
+            shell: ShellModeState::new(),
         }
     }
 
@@ -521,6 +627,15 @@ impl App {
     /// 重置卸载相关状态
     pub fn reset_remove_state(&mut self) {
         self.remove = RemoveModeState::new();
+        self.error_message = None;
+    }
+
+    /// 重置 Shell 状态
+    pub fn reset_shell_state(&mut self) {
+        // 保留 history，只清空输入和输出
+        let history = std::mem::take(&mut self.shell.history);
+        self.shell = ShellModeState::new();
+        self.shell.history = history;
         self.error_message = None;
     }
 
