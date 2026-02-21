@@ -73,6 +73,9 @@ pub fn spawn_update_task(app: &mut App, tx: &mpsc::Sender<AppEvent>) {
     app.update.lines.clear();
     app.update.lines.push("正在执行更新...".to_string());
 
+    // 在 UI 线程提前重置取消标志，防止工作线程内部的重置覆盖用户封窗口期的取消请求
+    crate::package_manager::reset_cancel();
+
     std::thread::spawn(move || {
         let packages_before = pm.get_explicit_packages().ok();
 

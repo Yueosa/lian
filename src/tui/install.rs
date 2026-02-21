@@ -320,6 +320,9 @@ pub fn spawn_install_task(app: &mut App, tx: &mpsc::Sender<AppEvent>) {
     ));
     app.install.scroll = 0;
 
+    // 在 UI 线程提前重置取消标志
+    crate::package_manager::reset_cancel();
+
     std::thread::spawn(move || {
         let (output_tx, mut output_rx) = tokio::sync::mpsc::unbounded_channel();
 

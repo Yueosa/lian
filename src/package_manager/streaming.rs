@@ -10,20 +10,28 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use tokio::sync::mpsc;
 
 /// 尝试删除 pacman db.lck（仅在确认没有 pacman 进程在运行时调用）
+///
+/// 锁文件归 root 所有，普通用户无写权限，必须通过 `sudo -n rm -f` 删除。
+/// `-n`（non-interactive）保证若 sudo 凭证已过期时静默失败，不阻塞 TUI。
 fn try_remove_db_lock() {
-    let lock_paths = [
-        "/var/lib/pacman/db.lck",
-    ];
-    for path in &lock_paths {
-        if std::path::Path::new(path).exists() {
-            // 检查是否有其他 pacman 进程在运行
-            let any_pacman = std::process::Command::new("pgrep")
-                .args(["-x", "pacman"])
-                .status()
-                .map(|s| s.success())
-                .unwrap_or(false);
-            if !any_pacman {
-                let _ = std::fs::remove_file(path);
+    let lock_path = "/var/lib/pacman/db.lck";
+    if !std::path::Path::new(lock_path).exists() {
+        return;
+    }
+    // 确认没有其他 pacman 进程持有锁
+    let any_pacman = std::process::Command::new("pgrep")
+        .args(["-x", "pacman"])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !any_pacman {
+        // 锁文件属于 root，必须借助 sudo 删除；-n 保证非交互静默失败
+        let status = std::process::Command::new("sudo")
+            .args(["-n", "rm", "-f", lock_path])
+            .status();
+        if let Ok(s) = status {
+            if !s.success() {
+                log::warn!("try_remove_db_lock: sudo rm -f {} 失败（exit={:?}）", lock_path, s.code());
             }
         }
     }
@@ -33,33 +41,61 @@ fn try_remove_db_lock() {
 static CHILD_PID: AtomicU32 = AtomicU32::new(0);
 static SHOULD_CANCEL: AtomicBool = AtomicBool::new(false);
 
-/// 设置取消标志
+/// 请求取消当前正在运行的包管理器操作。
+///
+/// 信号阶梯（均针对整个进程组 -pgid）：
+///   1. SIGINT  — 模拟用户 Ctrl+C，pacman 的信号处理器会在退出前自动清理 db.lck
+///   2. SIGTERM — 若 5 秒内进程未退出则发送，强制终止
+///   3. SIGKILL — 若再等 1 秒仍未退出则发送，最后手段
+///
+/// 当 CHILD_PID 尚未被工作线程写入（进程刚在启动窗口期）时，
+/// 最多等待 500 ms（10×50ms）让 PID 就绪；若超时仍为 0 则仅
+/// 依靠 SHOULD_CANCEL 标志让工作线程在读取流时自行退出。
 pub fn cancel_update() {
     SHOULD_CANCEL.store(true, Ordering::SeqCst);
-    let pid = CHILD_PID.load(Ordering::SeqCst);
+
+    // 处理竞争窗口：进程可能正在启动，PID 尚未存入
+    let mut pid = CHILD_PID.load(Ordering::SeqCst);
+    if pid == 0 {
+        for _ in 0..10 {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            pid = CHILD_PID.load(Ordering::SeqCst);
+            if pid != 0 {
+                break;
+            }
+        }
+    }
+
     if pid != 0 {
         unsafe {
-            // 先发 SIGTERM 到整个进程组，让 pacman 有机会清理锁文件
-            libc::kill(-(pid as i32), libc::SIGTERM);
+            // 第一步：SIGINT — 让 pacman 执行正常的信号处理退出流程（会自行删除锁文件）
+            libc::kill(-(pid as i32), libc::SIGINT);
         }
-        // 在后台线程中等待进程退出，超时后 SIGKILL，以免阻塞 TUI
+        // 在后台线程中等待，超时后逐步升级信号，以免阻塞 TUI
         std::thread::spawn(move || {
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+            // 等待 pacman 响应 SIGINT（最多 5 秒）
+            let sigterm_deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
             loop {
                 std::thread::sleep(std::time::Duration::from_millis(100));
                 let still_running = unsafe { libc::kill(-(pid as i32), 0) == 0 };
                 if !still_running {
                     break;
                 }
-                if std::time::Instant::now() >= deadline {
-                    unsafe { libc::kill(-(pid as i32), libc::SIGKILL); }
-                    std::thread::sleep(std::time::Duration::from_millis(200));
+                if std::time::Instant::now() >= sigterm_deadline {
+                    // 第二步：SIGTERM
+                    unsafe { libc::kill(-(pid as i32), libc::SIGTERM); }
+                    std::thread::sleep(std::time::Duration::from_millis(1000));
+                    // 第三步：SIGKILL（最后手段）
+                    if unsafe { libc::kill(-(pid as i32), 0) == 0 } {
+                        unsafe { libc::kill(-(pid as i32), libc::SIGKILL); }
+                        std::thread::sleep(std::time::Duration::from_millis(200));
+                    }
                     break;
                 }
             }
             unsafe { libc::waitpid(-(pid as i32), std::ptr::null_mut(), libc::WNOHANG); }
             CHILD_PID.store(0, Ordering::SeqCst);
-            // 进程退出后再尝试清理残留的锁文件
+            // 进程退出后尝试清理可能残留的锁文件（SIGKILL 时 pacman 无法自清）
             try_remove_db_lock();
         });
     }
@@ -71,30 +107,34 @@ pub fn reset_cancel() {
     CHILD_PID.store(0, Ordering::SeqCst);
 }
 
-/// 清理残留子进程（退出应用时调用）
+/// 清理残留子进程（退出应用时调用）。
+///
+/// 与 cancel_update 相同的信号阶梯：SIGINT → SIGTERM → SIGKILL。
+/// 此函数在主线程同步等待进程退出（阻塞 TUI 退出流程可接受）。
 pub fn cleanup_child_processes() {
     let pid = CHILD_PID.load(Ordering::SeqCst);
     if pid != 0 {
         unsafe {
-            // 先发 SIGTERM 让 pacman/paru 正常退出并自行清理锁文件
-            libc::kill(-(pid as i32), libc::SIGTERM);
+            // 首先发 SIGINT，让 pacman 有机会自行清理锁文件
+            libc::kill(-(pid as i32), libc::SIGINT);
         }
-        // 等待进程自然退出（最多 3 秒），期间每 100ms 检查一次
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        // 等待进程响应 SIGINT（最多 5 秒）
+        let sigterm_deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         loop {
             std::thread::sleep(std::time::Duration::from_millis(100));
-            let still_running = unsafe {
-                libc::kill(-(pid as i32), 0) == 0
-            };
+            let still_running = unsafe { libc::kill(-(pid as i32), 0) == 0 };
             if !still_running {
                 break;
             }
-            if std::time::Instant::now() >= deadline {
-                // 超时：强制杀死整个进程组
-                unsafe {
-                    libc::kill(-(pid as i32), libc::SIGKILL);
+            if std::time::Instant::now() >= sigterm_deadline {
+                // 升级为 SIGTERM
+                unsafe { libc::kill(-(pid as i32), libc::SIGTERM); }
+                std::thread::sleep(std::time::Duration::from_millis(1000));
+                // 最后手段：SIGKILL
+                if unsafe { libc::kill(-(pid as i32), 0) == 0 } {
+                    unsafe { libc::kill(-(pid as i32), libc::SIGKILL); }
+                    std::thread::sleep(std::time::Duration::from_millis(200));
                 }
-                std::thread::sleep(std::time::Duration::from_millis(200));
                 break;
             }
         }
@@ -105,7 +145,7 @@ pub fn cleanup_child_processes() {
         CHILD_PID.store(0, Ordering::SeqCst);
         SHOULD_CANCEL.store(false, Ordering::SeqCst);
     }
-    // 如果进程已不存在但锁文件还在，安全地尝试删除
+    // 无论进程是否存在，检查并清理残留锁文件
     try_remove_db_lock();
 }
 
@@ -182,6 +222,11 @@ fn read_stream_lines(
 }
 
 /// 通用的流式命令执行框架
+///
+/// 注意：**不再在此处调用 `reset_cancel()`**。
+/// 调用方（`spawn_update_task` / `spawn_install_task` / `spawn_remove_task`）
+/// 必须在启动工作线程之前于 UI 线程中调用 `reset_cancel()`，
+/// 以避免工作线程内部的重置覆盖用户在启动窗口期已经设置的取消标志。
 fn run_streaming_command(
     pm: &PackageManager,
     pacman_args: &[&str],
@@ -190,8 +235,6 @@ fn run_streaming_command(
     output_tx: mpsc::UnboundedSender<String>,
     cancel_label: &str,
 ) -> Result<UpdateOutput> {
-    reset_cancel();
-
     use std::os::unix::process::CommandExt;
 
     let mut child = if pm.command == "pacman" {
@@ -229,7 +272,14 @@ fn run_streaming_command(
         cmd.spawn()?
     };
 
-    CHILD_PID.store(child.id(), Ordering::SeqCst);
+    let child_pid = child.id();
+    CHILD_PID.store(child_pid, Ordering::SeqCst);
+
+    // 处理竞争窗口：用户可能在 PID 存入前就已调用 cancel_update() 设置了取消标志，
+    // 此时需要补发 SIGINT 让 pacman 有机会自行清理锁文件。
+    if should_cancel() {
+        unsafe { libc::kill(-(child_pid as i32), libc::SIGINT); }
+    }
 
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
@@ -246,11 +296,12 @@ fn run_streaming_command(
 
     let cancelled = should_cancel();
     if cancelled {
-        // 等待子进程自然退出（最多 3 秒），确保 pacman 有机会清理锁文件
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        // 等待子进程退出（最多 6 秒），此时 SIGINT/SIGTERM 已在 cancel_update 中发出；
+        // 超时才升级为 SIGKILL（最后手段，不触发 pacman 清理）
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(6);
         loop {
             match child.try_wait() {
-                Ok(Some(_)) => break, // 进程已退出
+                Ok(Some(_)) => break,
                 _ => {}
             }
             if std::time::Instant::now() >= deadline {
@@ -264,6 +315,7 @@ fn run_streaming_command(
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
         CHILD_PID.store(0, Ordering::SeqCst);
+        // SIGKILL 情况下 pacman 无法自清，兜底删除锁文件
         try_remove_db_lock();
         return Ok(UpdateOutput {
             stdout: all_stdout,
@@ -341,7 +393,7 @@ pub fn run_custom_command_streaming(
         anyhow::bail!("命令不能为空");
     }
 
-    reset_cancel();
+    // 注意：reset_cancel() 由调用方（UI 线程）在 spawn 前调用，此处不重置。
 
     let program = &cmd_parts[0];
     let args = &cmd_parts[1..];
@@ -361,7 +413,13 @@ pub fn run_custom_command_streaming(
     }
     let mut child = child.spawn()?;
 
-    CHILD_PID.store(child.id(), Ordering::SeqCst);
+    let child_pid = child.id();
+    CHILD_PID.store(child_pid, Ordering::SeqCst);
+
+    // 补发 SIGINT 处理竞争窗口
+    if should_cancel() {
+        unsafe { libc::kill(-(child_pid as i32), libc::SIGINT); }
+    }
 
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
@@ -377,7 +435,7 @@ pub fn run_custom_command_streaming(
 
     let cancelled = should_cancel();
     if cancelled {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(6);
         loop {
             match child.try_wait() {
                 Ok(Some(_)) => break,

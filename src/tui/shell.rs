@@ -279,6 +279,9 @@ fn spawn_shell_task(app: &mut App, tx: &mpsc::Sender<AppEvent>, cmd: String) {
     app.shell.lines.push(format!("$ {}", cmd));
     app.shell.lines.push(String::new());
 
+    // 在 UI 线程提前重置取消标志
+    crate::package_manager::reset_cancel();
+
     let tx_clone = tx.clone();
     std::thread::spawn(move || {
         let (output_tx, mut output_rx) = tokio::sync::mpsc::unbounded_channel();

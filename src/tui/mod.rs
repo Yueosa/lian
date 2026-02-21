@@ -183,7 +183,16 @@ pub async fn run(api_key: String, config: Config) -> Result<()> {
                         match app.mode {
                             AppMode::Dashboard => {}
                             AppMode::Update => {
-                                crate::package_manager::cancel_update();
+                                // 按当前阶段决定是否需要取消子进程
+                                match app.update.phase {
+                                    UpdatePhase::Updating | UpdatePhase::Analyzing => {
+                                        // 正在运行中：发送取消信号，后表1秒内进程组将自行退出
+                                        crate::package_manager::cancel_update();
+                                    }
+                                    _ => {
+                                        // 无运行中的子进程，直接返回，不错误地置位 SHOULD_CANCEL
+                                    }
+                                }
                                 app.mode = AppMode::Dashboard;
                                 app.update.reset_scroll();
                             }
