@@ -54,6 +54,10 @@ static SHOULD_CANCEL: AtomicBool = AtomicBool::new(false);
 pub fn cancel_update() {
     SHOULD_CANCEL.store(true, Ordering::SeqCst);
 
+    // 第一步：直接向运行中的 pacman/paru/yay 进程发 SIGINT，
+    // 让它们有机会自行清理 db.lck，然后再处理外层的 sudo/包装进程
+    sigint_inner_process();
+
     // 处理竞争窗口：进程可能正在启动，PID 尚未存入
     let mut pid = CHILD_PID.load(Ordering::SeqCst);
     if pid == 0 {
@@ -154,9 +158,33 @@ fn should_cancel() -> bool {
     SHOULD_CANCEL.load(Ordering::SeqCst)
 }
 
-/// 从流中读取行并发送到 channel（通用辅助函数）
-/// `\n` 行正常发送，stderr 加 `⚠ ` 前缀；
-/// `\r` 行（pacman/paru 下载进度条）统一以 "PROGRESS:" 前缀发送，无论来自 stdout 还是 stderr。
+/// 直接向 pacman/paru/yay 进程发送 SIGINT。
+///
+/// 通过 pgrep 找到这些进程并单独发信号，让其有机会自行清理 db.lck。
+fn sigint_inner_process() {
+    for name in &["pacman", "paru", "yay"] {
+        let output = std::process::Command::new("pgrep")
+            .args(["-x", name])
+            .output();
+        if let Ok(o) = output {
+            if o.status.success() {
+                let s = String::from_utf8_lossy(&o.stdout);
+                for line in s.lines() {
+                    if let Ok(pid) = line.trim().parse::<i32>() {
+                        unsafe { libc::kill(pid, libc::SIGINT); }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// 从流中读取行并发送到 channel（通用辅助函数）。
+///
+/// 使用 `pending_cr` 状态机处理不同换行模式：
+/// - `\r\n`：PTY/script 模式下的普通文本行
+/// - 裸 `\r`（后接非 `\n`）：进度刷新行，发送为 `PROGRESS:`
+/// - 单独 `\n`：普通管道模式下的文本行
 fn read_stream_lines(
     stream: Option<impl Read>,
     tx: &mpsc::UnboundedSender<String>,
@@ -164,8 +192,10 @@ fn read_stream_lines(
 ) -> String {
     let mut result = String::new();
     if let Some(mut reader) = stream {
-        let mut buffer = [0u8; 1024];
+        let mut buffer = [0u8; 2048];
         let mut line_buffer = String::new();
+        // 记录上一个字符是否是 \r（待确认是 \r\n 还是裸 \r）
+        let mut pending_cr = false;
 
         while let Ok(n) = reader.read(&mut buffer) {
             if n == 0 || should_cancel() {
@@ -174,8 +204,40 @@ fn read_stream_lines(
 
             let chunk = String::from_utf8_lossy(&buffer[..n]);
             for c in chunk.chars() {
+                if pending_cr {
+                    pending_cr = false;
+                    if c == '\n' {
+                        // \r\n — PTY 普通文本行
+                        let cleaned = clean_terminal_output(&line_buffer);
+                        if !cleaned.trim().is_empty() {
+                            let msg = if is_stderr {
+                                format!("⚠ {}", cleaned)
+                            } else {
+                                cleaned.clone()
+                            };
+                            let _ = tx.send(msg);
+                            result.push_str(&cleaned);
+                            result.push('\n');
+                        }
+                        line_buffer.clear();
+                        continue;
+                    } else {
+                        // 裸 \r（后接非 \n）— 进度行刷新
+                        let cleaned = clean_terminal_output(&line_buffer);
+                        if !cleaned.trim().is_empty() {
+                            let _ = tx.send(format!("PROGRESS:{}", cleaned));
+                        }
+                        line_buffer.clear();
+                        // 当前字符继续按正常逻辑处理
+                    }
+                }
+
                 match c {
+                    '\r' => {
+                        pending_cr = true;
+                    }
                     '\n' => {
+                        // 单独 \n（非 PTY 模式或 \r\n 已在上面处理）
                         let cleaned = clean_terminal_output(&line_buffer);
                         if !cleaned.trim().is_empty() {
                             let msg = if is_stderr {
@@ -189,21 +251,22 @@ fn read_stream_lines(
                         }
                         line_buffer.clear();
                     }
-                    '\r' => {
-                        // pacman/paru/yay 的下载进度条和 AUR 编译进度通过 \r 就地刷新
-                        // 无论来自 stdout 还是 stderr，都作为进度行发送，不追加到日志
-                        let cleaned = clean_terminal_output(&line_buffer);
-                        if !cleaned.trim().is_empty() {
-                            let _ = tx.send(format!("PROGRESS:{}", cleaned));
-                        }
-                        line_buffer.clear();
-                    }
                     _ => {
                         line_buffer.push(c);
                     }
                 }
             }
         }
+
+        // 处理未结束的 pending_cr
+        if pending_cr {
+            let cleaned = clean_terminal_output(&line_buffer);
+            if !cleaned.trim().is_empty() {
+                let _ = tx.send(format!("PROGRESS:{}", cleaned));
+            }
+            line_buffer.clear();
+        }
+
         if !line_buffer.is_empty() {
             let cleaned = clean_terminal_output(&line_buffer);
             if !cleaned.trim().is_empty() {
@@ -223,10 +286,12 @@ fn read_stream_lines(
 
 /// 通用的流式命令执行框架
 ///
-/// 注意：**不再在此处调用 `reset_cancel()`**。
-/// 调用方（`spawn_update_task` / `spawn_install_task` / `spawn_remove_task`）
-/// 必须在启动工作线程之前于 UI 线程中调用 `reset_cancel()`，
-/// 以避免工作线程内部的重置覆盖用户在启动窗口期已经设置的取消标志。
+/// 直接通过管道捕获 stdout/stderr，不使用 PTY 封装（避免 PTY slave 持有者
+/// 导致读取线程永久阻塞的问题）。`read_stream_lines` 的 `pending_cr` 状态机
+/// 对纯管道输出（只有 `\n`）同样兼容，不破坏现有逻辑。
+///
+/// 注意：**不再在此处调用 `reset_cancel()`**，
+/// 调用方必须在启动工作线程之前于 UI 线程中调用 `reset_cancel()`。
 fn run_streaming_command(
     pm: &PackageManager,
     pacman_args: &[&str],
@@ -246,9 +311,9 @@ fn run_streaming_command(
         cmd.args(&args);
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
+        cmd.stdin(Stdio::null());
         unsafe {
             cmd.pre_exec(|| {
-                // 创建独立进程组，方便统一杀死 sudo + pacman 整棵进程树
                 libc::setpgid(0, 0);
                 libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
                 Ok(())
@@ -262,6 +327,7 @@ fn run_streaming_command(
         cmd.args(&args);
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
+        cmd.stdin(Stdio::null());
         unsafe {
             cmd.pre_exec(|| {
                 libc::setpgid(0, 0);
@@ -278,6 +344,7 @@ fn run_streaming_command(
     // 处理竞争窗口：用户可能在 PID 存入前就已调用 cancel_update() 设置了取消标志，
     // 此时需要补发 SIGINT 让 pacman 有机会自行清理锁文件。
     if should_cancel() {
+        sigint_inner_process();
         unsafe { libc::kill(-(child_pid as i32), libc::SIGINT); }
     }
 
@@ -400,24 +467,27 @@ pub fn run_custom_command_streaming(
 
     use std::os::unix::process::CommandExt;
 
-    let mut child = Command::new(program);
-    child.args(args);
-    child.stdout(Stdio::piped());
-    child.stderr(Stdio::piped());
+    let mut cmd = Command::new(program);
+    cmd.args(args);
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+    cmd.stdin(Stdio::null());
     unsafe {
-        child.pre_exec(|| {
+        cmd.pre_exec(|| {
             libc::setpgid(0, 0);
             libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
             Ok(())
         });
     }
-    let mut child = child.spawn()?;
+
+    let mut child = cmd.spawn()?;
 
     let child_pid = child.id();
     CHILD_PID.store(child_pid, Ordering::SeqCst);
 
-    // 补发 SIGINT 处理竞争窗口
+    // 补发信号处理竞争窗口
     if should_cancel() {
+        sigint_inner_process();
         unsafe { libc::kill(-(child_pid as i32), libc::SIGINT); }
     }
 
