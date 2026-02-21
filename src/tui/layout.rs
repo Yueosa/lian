@@ -1,7 +1,7 @@
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Margin, Rect},
     style::{Color, Modifier, Style},
-    text::Line,
+    text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
     Frame,
 };
@@ -68,7 +68,22 @@ pub fn render_scrollable_content(
         .iter()
         .skip(actual_scroll)
         .take(visible_height)
-        .map(|line| Line::from(line.clone()))
+        .map(|line| {
+            if let Some(content) = line.strip_prefix("PROGRESS_LINE:") {
+                // 下载型进度行（含 iB）用青色 ⬇，其他进度行（paru AUR 等）用黄色 ⟳
+                let (icon, color) = if content.contains("iB") {
+                    ("⬇ ", Color::Cyan)
+                } else {
+                    ("⟳ ", Color::Yellow)
+                };
+                Line::from(vec![
+                    Span::styled(icon, Style::default().fg(color)),
+                    Span::styled(content.to_string(), Style::default().fg(color)),
+                ])
+            } else {
+                Line::from(line.clone())
+            }
+        })
         .collect();
 
     let paragraph = Paragraph::new(visible_content)

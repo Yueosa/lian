@@ -46,6 +46,176 @@ pub fn clean_terminal_output(input: &str) -> String {
     cleaned_lines.join("\n")
 }
 
+// ========== 进度信息解析 ==========
+
+/// 结构化进度信息，从 pacman/paru 的 \r 进度行解析
+#[derive(Debug, Clone, Default)]
+pub struct ProgressInfo {
+    /// 原始文本（渲染到主面板的显示文本）
+    pub raw: String,
+    /// 包名 / 操作标签（如 "wget-2.1-1" 或 "-> Building ..."）
+    pub label: String,
+    /// 总大小，如 "4.50 MiB"
+    pub total_size: String,
+    /// 下载速度，如 "2.10 MiB/s"
+    pub speed: String,
+    /// 剩余时间，如 "00:23"
+    pub eta: String,
+}
+
+impl ProgressInfo {
+    pub fn is_empty(&self) -> bool {
+        self.raw.is_empty()
+    }
+
+    /// 格式化为状态栏文本：label  ⬇ speed  / total  剩余 eta
+    pub fn footer_text(&self) -> String {
+        if self.raw.is_empty() {
+            return String::new();
+        }
+        let mut parts: Vec<String> = Vec::new();
+        if !self.label.is_empty() {
+            parts.push(self.label.clone());
+        }
+        if !self.speed.is_empty() {
+            parts.push(format!("⬇ {}", self.speed));
+        }
+        if !self.total_size.is_empty() {
+            parts.push(format!("/ {}", self.total_size));
+        }
+        if !self.eta.is_empty() {
+            parts.push(format!("剩余 {}", self.eta));
+        }
+        if parts.is_empty() {
+            // fallback: 截断 raw 文本
+            let s = &self.raw;
+            if s.len() > 60 { format!("{}…", &s[..58]) } else { s.clone() }
+        } else {
+            parts.join("  ")
+        }
+    }
+}
+
+/// 从 pacman/paru \r 进度行解析结构化信息。
+///
+/// 典型 pacman 下载行（管道模式）：
+///   `wget-2.1-1  200.0 KiB  1.23 MiB/s 00:00 [####################] 100%`
+/// 典型 paru AUR 行：
+///   `  -> Building ...`  或  `:: Downloading sources...`
+pub fn parse_progress_info(raw: &str) -> ProgressInfo {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return ProgressInfo::default();
+    }
+
+    let tokens: Vec<&str> = trimmed.split_whitespace().collect();
+    let n = tokens.len();
+    let mut label = String::new();
+    let mut total_size = String::new();
+    let mut speed = String::new();
+    let mut eta = String::new();
+
+    let mut i = 0;
+    while i < n {
+        let t = tokens[i];
+
+        // 跳过进度条 [####] 类似内容
+        if t.starts_with('[') {
+            i += 1;
+            continue;
+        }
+        // 跳过百分比 "100%"
+        if t.ends_with('%') && t[..t.len() - 1].chars().all(|c| c.is_ascii_digit()) {
+            i += 1;
+            continue;
+        }
+        // ETA：匹配 "N:NN" 或 "NN:NN"
+        if is_time_token(t) {
+            if eta.is_empty() {
+                eta = t.to_string();
+            }
+            i += 1;
+            continue;
+        }
+        // 速度：两个 token "1.23 MiB/s"
+        if i + 1 < n && contains_speed_unit(tokens[i + 1]) {
+            if is_number_token(t) {
+                speed = format!("{} {}", t, tokens[i + 1]);
+                i += 2;
+                continue;
+            }
+        }
+        // 速度：单个 token "1.23MiB/s"
+        if contains_speed_unit(t) {
+            if speed.is_empty() {
+                speed = t.to_string();
+            }
+            i += 1;
+            continue;
+        }
+        // 大小：两个 token "200.0 KiB"（不跟 /s）
+        if i + 1 < n && contains_size_unit(tokens[i + 1]) && !contains_speed_unit(tokens[i + 1]) {
+            if is_number_token(t) {
+                if total_size.is_empty() {
+                    total_size = format!("{} {}", t, tokens[i + 1]);
+                }
+                i += 2;
+                continue;
+            }
+        }
+        // 大小：单个 token "200.0KiB"
+        if contains_size_unit(t) && !contains_speed_unit(t) {
+            if total_size.is_empty() {
+                total_size = t.to_string();
+            }
+            i += 1;
+            continue;
+        }
+        // 标签：第一个非数字、非特殊 token
+        if label.is_empty() && !is_number_token(t) {
+            label = t.to_string();
+        }
+        i += 1;
+    }
+
+    // 对于 paru 风格的纯文字行（无数字字段），直接用裁剪后的 raw 作为标签
+    if label.is_empty() && speed.is_empty() && total_size.is_empty() {
+        label = if trimmed.len() > 45 {
+            format!("{}…", &trimmed[..44])
+        } else {
+            trimmed.to_string()
+        };
+    }
+
+    ProgressInfo { raw: trimmed.to_string(), label, total_size, speed, eta }
+}
+
+fn is_number_token(s: &str) -> bool {
+    !s.is_empty() && s.chars().all(|c| c.is_ascii_digit() || c == '.')
+}
+
+fn is_time_token(s: &str) -> bool {
+    let mut parts = s.splitn(2, ':');
+    match (parts.next(), parts.next()) {
+        (Some(h), Some(m)) => {
+            !h.is_empty()
+                && !m.is_empty()
+                && h.chars().all(|c| c.is_ascii_digit())
+                && m.chars().all(|c| c.is_ascii_digit())
+                && m.len() == 2
+        }
+        _ => false,
+    }
+}
+
+fn contains_speed_unit(s: &str) -> bool {
+    s.contains("iB/s") || (s.contains("iB/") && s.ends_with('s'))
+}
+
+fn contains_size_unit(s: &str) -> bool {
+    s.ends_with("iB") || s == "B"
+}
+
 /// 解析 pacman -Qs / -Ss 的搜索输出
 pub fn parse_search_output(output: &str, is_local: bool) -> Vec<PackageInfo> {
     let mut results = Vec::new();

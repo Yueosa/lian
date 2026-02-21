@@ -257,10 +257,11 @@ fn render_update_footer(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             }
         }
         UpdatePhase::Updating => {
-            if app.update.progress.is_empty() {
+            let pt = app.update.progress_info.footer_text();
+            if pt.is_empty() {
                 "更新进行中..."
             } else {
-                owned_text = format!("更新进行中 | {}", app.update.progress);
+                owned_text = pt;
                 &owned_text
             }
         }

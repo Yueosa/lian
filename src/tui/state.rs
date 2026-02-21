@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::package_manager::{InstalledPackage, PackageDetail, PackageInfo, PackageManager, UpdateOutput};
+use crate::package_manager::{InstalledPackage, PackageDetail, PackageInfo, PackageManager, ProgressInfo, UpdateOutput};
 use crate::sysinfo::SystemInfo;
 use std::collections::HashSet;
 use std::time::Instant;
@@ -151,6 +151,8 @@ pub struct UpdateModeState {
     pub output: Option<UpdateOutput>,
     pub lines: Vec<String>,
     pub progress: String,
+    pub progress_info: ProgressInfo,
+    pub last_line_is_progress: bool,
     pub packages_before: Option<String>,
     pub packages_after: Option<String>,
     pub analysis: Option<String>,
@@ -189,6 +191,8 @@ pub struct InstallModeState {
     pub lines: Vec<String>,
     pub output: Option<UpdateOutput>,
     pub progress: String,
+    pub progress_info: ProgressInfo,
+    pub last_line_is_progress: bool,
     pub analysis: Option<String>,
     pub scroll: usize,
     pub searching: bool,
@@ -210,6 +214,8 @@ pub struct RemoveModeState {
     pub lines: Vec<String>,
     pub output: Option<UpdateOutput>,
     pub progress: String,
+    pub progress_info: ProgressInfo,
+    pub last_line_is_progress: bool,
     pub analysis: Option<String>,
     pub scroll: usize,
     pub loading: bool,
@@ -242,42 +248,67 @@ pub struct ShellModeState {
     pub history: Vec<String>,
     /// 历史指针（None = 不处于历史浏览模式）
     pub history_idx: Option<usize>,
-    /// 进度提示
+    /// 进度提示（UI 消息，如剪贴板反馈）
     pub progress: String,
+    /// 结构化进度信息（来自 pacman/paru 的 \r 进度行）
+    pub progress_info: ProgressInfo,
+    /// 是否最后一行是进度行（用于原地覆盖）
+    pub last_line_is_progress: bool,
     /// 最终结果
     pub output: Option<UpdateOutput>,
 }
 
 // ========== 子状态 impl ==========
 
-/// 从输出行中解析进度信息（共用）
-fn parse_progress_line(line: &str) -> Option<String> {
-    // PROGRESS: 前缀行（\r 进度条）直接取内容
+/// 处理新到达的一行输出（共用）
+///
+/// - `PROGRESS:` 前缀行：解析结构化进度信息，并在主面板中原地覆盖最后一行
+/// - 普通 `\n` 行：追加到 `lines[]`，并从 `(n/n)` 模式更新操作标签
+fn handle_add_line(
+    line: String,
+    lines: &mut Vec<String>,
+    scroll: &mut usize,
+    progress_info: &mut ProgressInfo,
+    last_line_is_progress: &mut bool,
+) {
     if let Some(content) = line.strip_prefix("PROGRESS:") {
-        let s = content.trim();
-        if !s.is_empty() {
-            return Some(s.to_string());
+        let content = content.trim().to_string();
+        *progress_info = crate::package_manager::parse_progress_info(&content);
+        if *last_line_is_progress {
+            // 原地覆盖：替换 lines[] 中最后一行
+            if let Some(last) = lines.last_mut() {
+                *last = format!("PROGRESS_LINE:{}", content);
+            }
+        } else {
+            lines.push(format!("PROGRESS_LINE:{}", content));
+            *last_line_is_progress = true;
+            *scroll = lines.len().saturating_sub(1);
         }
+        return;
     }
+    *last_line_is_progress = false;
+    // 从 "(n/n) 动作" 格式更新操作标签，不改变 lines[] 的追加方式
+    if let Some(label) = extract_action_label(&line) {
+        progress_info.label = label.clone();
+        progress_info.raw = label;
+    }
+    lines.push(line);
+    if lines.len() > 1 {
+        *scroll = lines.len().saturating_sub(1);
+    }
+}
+
+fn extract_action_label(line: &str) -> Option<String> {
     let trimmed = line.trim();
-    // (n/n) 格式: pacman 安装/升级进度
     if trimmed.starts_with('(') {
         if let Some(end) = trimmed.find(')') {
             let inner = trimmed[1..end].trim();
             if inner.contains('/') {
                 let rest = trimmed[end + 1..].trim();
                 let action = rest.split_whitespace().next().unwrap_or("");
-                return Some(format!("[{action}] {inner}"));
-            }
-        }
-    }
-    // 下载速度标识: xxx iB/s
-    if let Some(speed_pos) = trimmed.find("iB/s") {
-        let before = &trimmed[..speed_pos + 4];
-        if let Some(last_space) = before.rfind([' ', '\t']) {
-            let speed = before[last_space..].trim();
-            if !speed.is_empty() {
-                return Some(format!("下载中... {speed}"));
+                if !action.is_empty() {
+                    return Some(format!("({}) {}", inner, action));
+                }
             }
         }
     }
@@ -320,6 +351,8 @@ impl UpdateModeState {
             output: None,
             lines: Vec::new(),
             progress: String::new(),
+            progress_info: ProgressInfo::default(),
+            last_line_is_progress: false,
             packages_before: None,
             packages_after: None,
             analysis: None,
@@ -334,20 +367,7 @@ impl UpdateModeState {
     }
 
     pub fn add_line(&mut self, line: String) {
-        // PROGRESS: 行只更新进度显示，不往日志中追加
-        if line.starts_with("PROGRESS:") {
-            if let Some(p) = parse_progress_line(&line) {
-                self.progress = p;
-            }
-            return;
-        }
-        if let Some(p) = parse_progress_line(&line) {
-            self.progress = p;
-        }
-        self.lines.push(line);
-        if self.lines.len() > 1 {
-            self.scroll = self.lines.len().saturating_sub(1);
-        }
+        handle_add_line(line, &mut self.lines, &mut self.scroll, &mut self.progress_info, &mut self.last_line_is_progress);
     }
 
     pub fn scroll_up(&mut self) {
@@ -418,6 +438,8 @@ impl InstallModeState {
             lines: Vec::new(),
             output: None,
             progress: String::new(),
+            progress_info: ProgressInfo::default(),
+            last_line_is_progress: false,
             analysis: None,
             scroll: 0,
             searching: false,
@@ -433,20 +455,7 @@ impl InstallModeState {
     }
 
     pub fn add_line(&mut self, line: String) {
-        // PROGRESS: 行只更新进度显示，不往日志中追加
-        if line.starts_with("PROGRESS:") {
-            if let Some(p) = parse_progress_line(&line) {
-                self.progress = p;
-            }
-            return;
-        }
-        if let Some(p) = parse_progress_line(&line) {
-            self.progress = p;
-        }
-        self.lines.push(line);
-        if self.lines.len() > 1 {
-            self.scroll = self.lines.len().saturating_sub(1);
-        }
+        handle_add_line(line, &mut self.lines, &mut self.scroll, &mut self.progress_info, &mut self.last_line_is_progress);
     }
 }
 
@@ -464,6 +473,8 @@ impl RemoveModeState {
             lines: Vec::new(),
             output: None,
             progress: String::new(),
+            progress_info: ProgressInfo::default(),
+            last_line_is_progress: false,
             analysis: None,
             scroll: 0,
             loading: false,
@@ -477,20 +488,7 @@ impl RemoveModeState {
     }
 
     pub fn add_line(&mut self, line: String) {
-        // PROGRESS: 行只更新进度显示，不往日志中追加
-        if line.starts_with("PROGRESS:") {
-            if let Some(p) = parse_progress_line(&line) {
-                self.progress = p;
-            }
-            return;
-        }
-        if let Some(p) = parse_progress_line(&line) {
-            self.progress = p;
-        }
-        self.lines.push(line);
-        if self.lines.len() > 1 {
-            self.scroll = self.lines.len().saturating_sub(1);
-        }
+        handle_add_line(line, &mut self.lines, &mut self.scroll, &mut self.progress_info, &mut self.last_line_is_progress);
     }
 
     /// 对卸载的包列表应用筛选
@@ -539,23 +537,14 @@ impl ShellModeState {
             history: Vec::new(),
             history_idx: None,
             progress: String::new(),
+            progress_info: ProgressInfo::default(),
+            last_line_is_progress: false,
             output: None,
         }
     }
 
     pub fn add_line(&mut self, line: String) {
-        // PROGRESS: 行只更新进度显示，不往日志追加
-        if line.starts_with("PROGRESS:") {
-            self.progress = line[9..].trim().to_string();
-            return;
-        }
-        if let Some(p) = parse_progress_line(&line) {
-            self.progress = p;
-        }
-        self.lines.push(line);
-        if self.lines.len() > 1 {
-            self.scroll = self.lines.len().saturating_sub(1);
-        }
+        handle_add_line(line, &mut self.lines, &mut self.scroll, &mut self.progress_info, &mut self.last_line_is_progress);
     }
 
     pub fn get_content(&self) -> Vec<String> {

@@ -674,10 +674,11 @@ fn render_output_view(f: &mut Frame, app: &App) {
     let owned_text: String;
     let footer_text = match app.install.phase {
         InstallPhase::Installing => {
-            if app.install.progress.is_empty() {
+            let pt = app.install.progress_info.footer_text();
+            if pt.is_empty() {
                 "安装进行中..."
             } else {
-                owned_text = format!("安装进行中 | {}", app.install.progress);
+                owned_text = pt;
                 &owned_text
             }
         }

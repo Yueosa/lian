@@ -658,10 +658,11 @@ fn render_output_view(f: &mut Frame, app: &App) {
     let owned_text: String;
     let footer_text = match app.remove.phase {
         RemovePhase::Removing => {
-            if app.remove.progress.is_empty() {
+            let pt = app.remove.progress_info.footer_text();
+            if pt.is_empty() {
                 "卸载进行中..."
             } else {
-                owned_text = format!("卸载进行中 | {}", app.remove.progress);
+                owned_text = pt;
                 &owned_text
             }
         }

@@ -9,6 +9,8 @@ pub use streaming::cancel_update;
 pub use streaming::cleanup_child_processes;
 pub use streaming::reset_cancel;
 pub use streaming::run_custom_command_streaming;
+pub use parser::ProgressInfo;
+pub use parser::parse_progress_info;
 pub use types::{InstalledPackage, PackageDetail, PackageInfo, UpdateOutput};
 
 use anyhow::{anyhow, Result};
